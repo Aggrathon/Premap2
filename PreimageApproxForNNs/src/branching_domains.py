@@ -14,6 +14,16 @@ import arguments
 from tensor_storage import TensorStorage
 
 
+try:
+    from premap2 import PriorityDomains
+except ImportError:
+    import sys
+    from pathlib import Path
+    sys.path.append(str(Path(__file__).parent.parent.parent / 'src'))
+    from premap2 import PriorityDomains
+
+
+
 class AbstractReLUDomainList():
     """
         Abstract class that maintains the list of domains (variables on CPUs)
@@ -56,8 +66,8 @@ class SortedReLUDomainList(AbstractReLUDomainList):
         Maintains a sorted list of domain list, but add and remove domains individually which is slow
     """
 
-    def __init__(self, cov_vol, cov_quota, A_list, bias_list, global_lbs, global_ubs, lb_alls, ub_alls, slopes, history, depths, Cs,
-                 thresholds, beta, num, interm_transfer=True):
+    def __init__(self, cov_info, A_list, bias_list, global_lbs, global_ubs, lb_alls, ub_alls, slopes, history, depths, Cs,
+                 thresholds, beta, num, interm_transfer=True, samples=None):
         # interm_transfer is a dummy argument - has no effect for sorted domain list
         super(SortedReLUDomainList, self).__init__()
 
@@ -71,8 +81,7 @@ class SortedReLUDomainList(AbstractReLUDomainList):
         # instance_lAs = [[] for _ in range(num)]
         # for i in range(num):
         #     instance_lAs[i] = [lA[i:(i+1)] for lA in lAs]
-        candidate_domains = [ReLUDomain(cov_vol[i],
-            cov_quota[i],
+        candidate_domains = [ReLUDomain(*cov_info[i],
             A_list[i],
             bias_list[i],
             # instance_lAs[i],
@@ -85,11 +94,12 @@ class SortedReLUDomainList(AbstractReLUDomainList):
             depth=depths[i],
             c=Cs[i:i+1],
             threshold=thresholds[i] if thresholds.numel() > 1 else thresholds,
-            beta=beta if beta is not None else None
+            beta=beta if beta is not None else None,
+            samples=samples if samples is not None else None
         ).to_cpu() for i in range(num)]
-        self.domains = SortedList()
+        self.domains = PriorityDomains()
         for domain in candidate_domains:
-            self.domains.add(domain)
+            self.add_domain(domain)
 
     def pick_out(self, batch, device='cpu'):
 
@@ -103,9 +113,10 @@ class SortedReLUDomainList(AbstractReLUDomainList):
         dm_l_all, dm_u_all = [], []
         c_all, thresholds_all = [], []
         assert len(self) > 0, "The given domains list is empty."
+        selected_candidate_domain = self.domains[0]
         while True:
             # Pop out domains from the list one by one (SLOW).
-            if len(self.domains) == 0:
+            if len(self.domains) == 0 or self.domains[0].priority == -np.inf:
                 print(f"No domain left to pick from. Batch limit {batch} current batch: {idx}")
                 break
             if idx2 == len(self.domains): break  # or len(domains)-1?
@@ -119,7 +130,7 @@ class SortedReLUDomainList(AbstractReLUDomainList):
                 # unique = [x for i, x in enumerate(selected_candidate_domain.history) if i == selected_candidate_domain.history.index(x)]
                 # assert len(unique) == len(selected_candidate_domain.history)
                 # We transfer only some of the tensors directly to GPU. Other tensors will be transfered in batch later.
-                selected_candidate_domain.to_device(device, partial=True)
+                selected_candidate_domain.to_device(device)
                 idx += 1
                 # As.append(selected_candidate_domain.preimg_A)
                 lower_all.append(selected_candidate_domain.lower_all)
@@ -142,7 +153,7 @@ class SortedReLUDomainList(AbstractReLUDomainList):
 
         if batch == 0:
             if isinstance(selected_candidate_domain, ReLUDomain):
-                return None, None, None, None, None, None, None, None, None, None
+                return None, None, None, None, None, None, None, None, None
             else:
                 return None, None, None, None, None, None, None
 
@@ -172,7 +183,7 @@ class SortedReLUDomainList(AbstractReLUDomainList):
 
             # Recompute the mask on GPU.
             for j in range(len(lower_bounds) - 1):  # Exclude the final output layer.
-                new_masks.append(torch.logical_and(lower_bounds[j] < 0, upper_bounds[j] > 0).view(lower_bounds[0].size(0), -1).float())
+                new_masks.append(torch.logical_and(lower_bounds[j] < 0, upper_bounds[j] > 0).view(lower_bounds[0].size(0), -1))
 
         thresholds = torch.stack(thresholds_all).to(device=device, non_blocking=True)
 
@@ -201,18 +212,37 @@ class SortedReLUDomainList(AbstractReLUDomainList):
             # Input split domains.
             return slopes, torch.cat(dm_l_all).to(device=device, non_blocking=True), torch.cat(dm_u_all).to(device=device, non_blocking=True), selected_candidate_domains, cs, thresholds
 
-    def add_domain(self, relu_dm):
+    def add_domain(self, relu_dm: "ReLUDomain"):
+        if torch.any(relu_dm.upper_bound < relu_dm.threshold).detach().cpu().item():
+            print(f"Skipping subdomain without preimage ({relu_dm.volume:.5f}).")
+            return
+        elif relu_dm.volume < 1e-6:
+            print(f"Discarding subdomain with tiny volume ({relu_dm.volume:.5f}).")
+            return
+        elif torch.all(relu_dm.lower_bound > relu_dm.threshold).detach().cpu().item():
+            print(f"Subdomain fully verified ({relu_dm.preimg_vol * relu_dm.preimg_cov:.5f} / {relu_dm.preimg_vol:.5f} / {relu_dm.volume:.5f}).")
+            relu_dm.samples = relu_dm.beta = relu_dm.slope = relu_dm.intermediate_betas = relu_dm.lower_all =  relu_dm.upper_all = None
+            relu_dm.priority = -np.inf
+            relu_dm.preimg_A = relu_dm.preimg_A.new_zeros(()).expand(relu_dm.preimg_A.shape)
+            relu_dm.preimg_b = relu_dm.lower_bound
+            relu_dm.preimg_cov = 1.0
+            relu_dm.preimg_vol = relu_dm.volume
+        elif relu_dm.priority == -np.inf:
+            print(f"Subdomain fully explored ({relu_dm.preimg_vol * relu_dm.preimg_cov:.5f} / {relu_dm.preimg_vol:.5f} / {relu_dm.volume:.5f}).")
+            relu_dm.samples = relu_dm.beta = relu_dm.slope = relu_dm.intermediate_betas = relu_dm.lower_all =  relu_dm.upper_all = None
         self.domains.add(relu_dm)
+    
+
     def check_history(self, history_tr):
         split_num = 0
         for i in range(len(history_tr)):
             if len(history_tr[i][0]):
                 split_num += len(history_tr[i][0])
         return split_num
-    def add(self, tot_ambi_nodes_sample, cov_vols, cov_quotas, A_list, b_list, lbs, ubs, lb_alls, up_alls, histories, left_right_his, depths, slopes, betas,
-            split_histories, branching_decisions, decision_threshs,
-            intermediate_betas, check_infeasibility, Cs, num):
 
+    def add(self, cov_info, A_list, b_list, lbs, ubs, lb_alls, up_alls, histories, left_right_his, depths, slopes, betas,
+            split_histories, branching_decisions, decision_threshs,
+            intermediate_betas, check_infeasibility, Cs, num, samples):
         lbs, ubs = lbs[:num], ubs[:num]
         split_histories = split_histories[:num]
         Cs = Cs[:num]
@@ -242,7 +272,7 @@ class SortedReLUDomainList(AbstractReLUDomainList):
 
         batch = len(histories)
         decision_threshs = decision_threshs.to(lbs[0].device, non_blocking=True)
-        for i in range(batch):
+        for i in range(len(cov_info)):
             infeasible = False
             # if (lbs[i] <= decision_threshs[i]).all():
             # NOTE add the domain anyway since we do not aim at calculating bounds that satisfy the threshold
@@ -253,73 +283,18 @@ class SortedReLUDomainList(AbstractReLUDomainList):
                         print('infeasible detected when adding to domain!!!!!!!!!!!!!!')
                         break
 
-            if cov_vols[0]>0:
+            if cov_info[i][0]>0:
                 if not infeasible:
-                    priority=0
-                    # new_history = copy.deepcopy(histories[i])
-                    # if branching_decisions is not None:
-                    #     new_history[branching_decisions[i][0]][0].append(branching_decisions[i][1])  # first half batch: active neurons
-                    #     new_history[branching_decisions[i][0]][1].append(+1.0)  # first half batch: active neurons
-
-                    #     # sanity check repeated split
-                    #     if branching_decisions[i][1] in histories[i][branching_decisions[i][0]][0]:
-                    #         print('BUG!!! repeated split!')
-                    #         print(histories[i])
-                    #         print(branching_decisions[i])
-                    #         raise RuntimeError
-
-                    left_primals = None
-                    left = ReLUDomain(cov_vols[0], cov_quotas[0], A_list[0], b_list[0], lbs[i], ubs[i], instance_lb_alls[i], instance_up_alls[i],
+                    domain = ReLUDomain(*cov_info[i], A_list[i], b_list[i], lbs[i], ubs[i], instance_lb_alls[i], instance_up_alls[i],
                                         instance_slopes[i],
                                         betas[i],
                                         depths[i]+1, split_history=split_histories[i],
-                                        history=left_right_his[0],
+                                        history=left_right_his[i],
                                         intermediate_betas=intermediate_betas[i],
-                                        primals=left_primals, priority=priority,
-                                        c=Cs[i:i+1], threshold=decision_threshs[i])
-
-                    split_num = self.check_history(left.history)
-                    if split_num == tot_ambi_nodes_sample:
-                        left.valid = False
-                        left.preimg_cov = 1
-                        # if left.preimg_cov < 1:
-                        #     print("this is not right")
-                        #     print("look into details")
-                    self.domains.add(left)
-
-            # infeasible = False
-            # if (lbs[i+batch] <= decision_threshs[i]).all():
-
-            if check_infeasibility:
-                for ii, (l, u) in enumerate(zip(lb_alls[i+batch][1:-1], up_alls[i+batch][1:-1])):
-                    if (l-u).max() > 1e-6:
-                        infeasible = True
-                        print('infeasible detected when adding to domain!!!!!!!!!!!!!!')
-                        break
-
-            if cov_vols[1]>0:
-                if not infeasible:
-                    priority=0
-                    # new_history = copy.deepcopy(histories[i])
-                    # if branching_decisions is not None:
-                    #     new_history[branching_decisions[i][0]][0].append(branching_decisions[i][1])  # second half batch: inactive neurons
-                    #     new_history[branching_decisions[i][0]][1].append(-1.0)  # second half batch: inactive neurons
-
-                    right_primals = None
-                    right = ReLUDomain(cov_vols[1], cov_quotas[1], A_list[1], b_list[1], lbs[i+batch], ubs[i+batch], instance_lb_alls[i+batch], instance_up_alls[i+batch],
-                                        instance_slopes[i+batch],  betas[i+batch], depths[i+batch]+1, split_history=split_histories[i+batch],
-                                        history=left_right_his[1],
-                                        intermediate_betas=intermediate_betas[i + batch],
-                                        primals=right_primals, priority=priority,
-                                        c=Cs[i+batch:i+batch+1], threshold=decision_threshs[i])
-                    split_num = self.check_history(right.history)
-                    if split_num == tot_ambi_nodes_sample:
-                        right.valid = False
-                        right.preimg_cov = 1
-                        # if right.preimg_cov < 1:
-                        #     print("this is not right")
-                        #     print("look into details")
-                    self.domains.add(right)
+                                        primals=None, priority=0,
+                                        c=Cs[i:i+1], threshold=decision_threshs[i],
+                                        samples=samples[i])
+                    self.add_domain(domain.to_cpu())
 
     def get_min_domain(self, num, rev_order=False):
         if not rev_order:
@@ -616,10 +591,10 @@ class ReLUDomain:
     the lower bound estimated for the instances.
     """
 
-    def __init__(self, preimg_vol=None, preimg_cov=None, preimg_A=None, preimg_b=None, lb=-float('inf'), ub=float('inf'), lb_all=None,
+    def __init__(self, preimg_vol=None, preimg_cov=None, volume=1.0, preimg_A=None, preimg_b=None, lb=-float('inf'), ub=float('inf'), lb_all=None,
                 up_all=None, slope=None, beta=None, depth=None, split_history=None,
                 history=None,  gnn_decision=None, intermediate_betas=None, primals=None,
-                priority=0, c=None, threshold=np.float64(0.)):
+                priority=0, c=None, threshold=np.float64(0.), samples=None):
         if history is None:
             history = []
         if split_history is None:
@@ -628,6 +603,8 @@ class ReLUDomain:
         self.preimg_cov = preimg_cov
         self.preimg_A = preimg_A
         self.preimg_b = preimg_b
+        self.volume = volume
+        self.samples = samples
         # self.lA = lA
         self.lower_bound = lb
         self.upper_bound = ub
@@ -662,6 +639,9 @@ class ReLUDomain:
             self.priority = preimg_vol * (1 - preimg_cov)  # Higher priority will be more likely to be selected.
         elif arguments.Config["preimage"]["over_approx"]:
             self.priority = preimg_vol * (preimg_cov - 1)
+        if preimg_vol == 0 or preimg_cov == 1:
+            self.priority = -np.inf
+
     def __lt__(self, other):
         # if self.priority == other.priority:
         #     if arguments.Config["bab"]["cut"]["enabled"] and arguments.Config["bab"]["cut"]["cplex_cuts"] and arguments.Config["bab"]["cut"]["cplex_cuts_revpickup"]:
@@ -680,12 +660,6 @@ class ReLUDomain:
         #         return (self.lower_bound - self.threshold).max() <= (other.lower_bound - other.threshold).max()
         # else:
         return self.priority > other.priority
-
-    def __eq__(self, other):
-        # if self.priority == other.priority:
-        #     return (self.lower_bound - self.threshold).max() == (other.lower_bound - other.threshold).max()
-        # else:
-        return self.priority == other.priority
 
     def verify_criterion(self):
         return (self.lower_bound > self.threshold).any()
@@ -749,11 +723,13 @@ class ReLUDomain:
         #         self.primals['z'][layer_idx] = self.primals['z'][layer_idx].to(device='cpu', non_blocking=True)
         if self.c is not None:
             self.c = self.c.to(device='cpu', non_blocking=True)
+        if self.samples is not None:
+            self.samples = self.samples.to('cpu', non_blocking=True)
         return self
 
     def to_device(self, device, partial=False):
         if not partial:
-            self.lA = [lA.to(device, non_blocking=True) for lA in self.lA]
+            # self.lA = [lA.to(device, non_blocking=True) for lA in self.lA]
             self.lower_all = [lbs.to(device, non_blocking=True) for lbs in self.lower_all]
             self.upper_all = [ubs.to(device, non_blocking=True) for ubs in self.upper_all]
         for layer in self.slope:
@@ -796,6 +772,8 @@ class ReLUDomain:
 
         if self.c is not None:
             self.c = self.c.to(device, non_blocking=True)
+        if self.samples is not None:
+            self.samples = self.samples.to(device, non_blocking=True)
         return self
 
     def clone_to_dive(self, beam_search=False):

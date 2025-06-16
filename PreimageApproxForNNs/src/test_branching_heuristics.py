@@ -18,7 +18,7 @@ from torch.nn import functional as F
 
 from model_defs import Flatten
 from auto_LiRPA.bound_ops import BoundRelu, BoundLinear, BoundConv, BoundBatchNormalization, BoundAdd
-import preimage_arguments
+import arguments
 
 Icp_score_counter = 0
 
@@ -831,7 +831,7 @@ def input_split_branching(net, dom_lb, dm_l_all, dm_u_all, lA, thresholds, branc
         # perturb shape: (batch, 1, # inputs)
         # dom_lb shape: (batch, spec)
         # thresholds shape: (batch, spec)
-        lA_clamping_thresh = preimage_arguments.Config["bab"]["branching"]["sb_coeff_thresh"]
+        lA_clamping_thresh = arguments.Config["bab"]["branching"]["sb_coeff_thresh"]
         assert lA_clamping_thresh >= 0
         score = dom_lb.to(lA.device)[..., None] + lA.abs().clamp(min=lA_clamping_thresh) * perturb / 2 - thresholds[..., None]
         # score shape: (batch, spec, # inputs)
@@ -1022,8 +1022,8 @@ def input_split_all_feature_parallel(dm_l_all, dm_u_all, shape=None,
 
 def get_split_depth(dm_l_all):
     split_depth = 1
-    if len(dm_l_all) < preimage_arguments.Config["solver"]["min_batch_size_ratio"] * preimage_arguments.Config["solver"]["batch_size"]:
-        min_batch_size = preimage_arguments.Config["solver"]["min_batch_size_ratio"] * preimage_arguments.Config["solver"]["batch_size"]
+    if len(dm_l_all) < arguments.Config["solver"]["min_batch_size_ratio"] * arguments.Config["solver"]["batch_size"]:
+        min_batch_size = arguments.Config["solver"]["min_batch_size_ratio"] * arguments.Config["solver"]["batch_size"]
         split_depth = int(math.log(min_batch_size//len(dm_l_all))//math.log(2))
         split_depth = max(split_depth, 1)
     return split_depth

@@ -79,7 +79,7 @@ def concretize_poly_vol(lb, ub, node, root, batch_size, output_dim, bound_lower=
     return lb, ub
 
 
-def concretize_relu_poly_vol(lb, ub, node, root, batch_size, output_dim, bound_lower=True, bound_upper=True, average_A=False, sample_left_idx=None, sample_right_idx=None, debug=False):
+def concretize_relu_poly_vol(lb, ub, node, root, batch_size, output_dim, bound_lower=True, bound_upper=True, average_A=False, samples=None, debug=False):
 
     for i in range(len(root)):
         if root[i].lA is None and root[i].uA is None: continue
@@ -106,9 +106,9 @@ def concretize_relu_poly_vol(lb, ub, node, root, batch_size, output_dim, bound_l
                 # NOTE: this branch is used for relu-splitting-based preimage volume estimation
                 if debug:
                     lb = root[i].perturbation.concretize_relu_poly_vol(
-                        root[i].center, lA, lb, sign=-1, aux=root[i].aux, sample_left_idx=sample_left_idx, sample_right_idx=sample_right_idx) if bound_lower else None
+                        root[i].center, lA, lb, sign=-1, aux=root[i].aux, samples=samples) if bound_lower else None
                     ub = root[i].perturbation.concretize_relu_poly_vol(
-                        root[i].center, uA, ub, sign=+1, aux=root[i].aux, sample_left_idx=sample_left_idx, sample_right_idx=sample_right_idx) if bound_upper else None
+                        root[i].center, uA, ub, sign=+1, aux=root[i].aux, samples=samples) if bound_upper else None
                     # if (sample_left_idx is None) and (sample_right_idx is None):
                     #     if lb is not None:
                     #         lb = torch.sigmoid(lb)
@@ -132,16 +132,9 @@ def concretize_relu_poly_vol(lb, ub, node, root, batch_size, output_dim, bound_l
                                 # ub = ub_0 + ub_1                                                                                   
                 else:
                     lb = root[i].perturbation.concretize_relu_poly_vol(
-                        root[i].center, lA, lb, sign=-1, aux=root[i].aux, sample_left_idx=sample_left_idx, sample_right_idx=sample_right_idx) if bound_lower else None
+                        root[i].center, lA, lb, sign=-1, aux=root[i].aux, samples=samples) if bound_lower else None
                     ub = root[i].perturbation.concretize_relu_poly_vol(
-                        root[i].center, uA, ub, sign=+1, aux=root[i].aux, sample_left_idx=sample_left_idx, sample_right_idx=sample_right_idx) if bound_upper else None
-                    if lb is not None:
-                        lb = torch.sigmoid(lb)
-                        lb = torch.mean(lb)
-                    if ub is not None:
-                        ub = torch.sigmoid(ub)
-                        ub = torch.mean(ub)
-                        # ub = torch.sum(ub)
+                        root[i].center, uA, ub, sign=+1, aux=root[i].aux, samples=samples) if bound_upper else None
         else:
             fv = root[i].forward_value
             if type(root[i]) == BoundInput:

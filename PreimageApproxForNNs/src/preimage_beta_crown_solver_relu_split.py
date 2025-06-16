@@ -97,7 +97,7 @@ class LiRPAConvNet:
         except AssertionError:
             print(f'torch allclose failed: norm {torch.norm(net(dummy) - self.net(dummy))}')
 
-    def get_lower_bound(self, pre_lbs, pre_ubs, split, slopes=None, betas=None, history=None, sample_left_idx=None, sample_right_idx=None, fix_intermediate_layer_bounds=True,
+    def get_lower_bound(self, pre_lbs, pre_ubs, split, slopes=None, betas=None, history=None, samples=None, fix_intermediate_layer_bounds=True,
                         split_history=None, single_node_split=True, intermediate_betas=None, cs=None, decision_thresh=None, rhs=0,
                         stop_func=stop_criterion_sum(0), multi_spec_keep_func=None, bound_lower=True, bound_upper=False):
 
@@ -111,7 +111,6 @@ class LiRPAConvNet:
         """
         if history is None:
             history = []
-        start = time.time()
 
         if "cut" in split:
             ret = self.update_bounds_cut_naive(
@@ -121,7 +120,7 @@ class LiRPAConvNet:
                 cs=cs)
         else:
             ret = self.update_bounds_parallel(
-                pre_lbs, pre_ubs, split, slopes, betas=betas, history=history,sample_left_idx=sample_left_idx, sample_right_idx=sample_right_idx,
+                pre_lbs, pre_ubs, split, slopes, betas=betas, history=history,samples=samples,
                 fix_intermediate_layer_bounds=fix_intermediate_layer_bounds,
                 split_history=split_history, cs=cs, decision_thresh=decision_thresh,
                 stop_criterion_func=stop_func, multi_spec_keep_func=multi_spec_keep_func, 
@@ -129,12 +128,6 @@ class LiRPAConvNet:
 
         # if get_upper_bound and single_node_split, primals have p and z values; otherwise None
         lower_bounds, upper_bounds, lAs, A, slopes, betas, split_history, best_intermediate_betas, primals, new_cs = ret
-
-        beta_time = time.time()-start
-
-
-        end = time.time()
-        print('batch bounding time: ', end - start)
 
         return upper_bounds[-1], lower_bounds[-1], None, lAs, A, lower_bounds, \
                upper_bounds, slopes, split_history, betas, best_intermediate_betas, primals, new_cs
@@ -506,7 +499,7 @@ class LiRPAConvNet:
     """Main function for computing bounds after branch and bound in Beta-CROWN."""
     def update_bounds_parallel(
             self, pre_lb_all=None, pre_ub_all=None, split=None, slopes=None,
-            beta=None, betas=None, history=None, sample_left_idx=None, sample_right_idx=None, fix_intermediate_layer_bounds=True, shortcut=False,
+            beta=None, betas=None, history=None, samples=None, fix_intermediate_layer_bounds=True, shortcut=False,
             split_history=None, cs=None, decision_thresh=None, stop_criterion_func=stop_criterion_sum(0),
             multi_spec_keep_func=None, bound_lower=True, bound_upper=False):
         global total_func_time, total_bound_time, total_prepare_time, total_beta_bound_time, total_transfer_time, total_finalize_time
@@ -713,16 +706,16 @@ class LiRPAConvNet:
             zero_indices_neuron = [torch.as_tensor(t).to(device=self.net.device, non_blocking=True) for t in zero_indices_neuron]
 
             # 2 * batch + diving_batch
-            upper_bounds = [torch.cat([i[:batch], i[:batch], i[batch:]], dim=0) for i in pre_ub_all[:-1]]
-            lower_bounds = [torch.cat([i[:batch], i[:batch], i[batch:]], dim=0) for i in pre_lb_all[:-1]]
+            upper_bounds = [i if i.shape[0] == 2 * batch + diving_batch else torch.cat([i[:batch], i[:batch], i[batch:]], dim=0) for i in pre_ub_all[:-1]]
+            lower_bounds = [i if i.shape[0] == 2 * batch + diving_batch else torch.cat([i[:batch], i[:batch], i[batch:]], dim=0) for i in pre_lb_all[:-1]]
 
             # 2 * cs
             if cs is not None:
                 double_cs = torch.cat([cs[:batch], cs[:batch], cs[batch:]], dim=0)
 
             # Only the last element is used later.
-            pre_lb_last = torch.cat([pre_lb_all[-1][:batch], pre_lb_all[-1][:batch], pre_lb_all[-1][batch:]])
-            pre_ub_last = torch.cat([pre_ub_all[-1][:batch], pre_ub_all[-1][:batch], pre_ub_all[-1][batch:]])
+            pre_lb_last = pre_lb_all[-1] if pre_lb_all[-1].shape[0] == 2 * batch + diving_batch else torch.cat([pre_lb_all[-1][:batch], pre_lb_all[-1][:batch], pre_lb_all[-1][batch:]])
+            pre_ub_last = pre_ub_all[-1] if pre_ub_all[-1].shape[0] == 2 * batch + diving_batch else torch.cat([pre_ub_all[-1][:batch], pre_ub_all[-1][:batch], pre_ub_all[-1][batch:]])
 
             new_intermediate_layer_bounds = {}
             for d in range(len(lower_bounds)):
@@ -734,9 +727,10 @@ class LiRPAConvNet:
                 new_intermediate_layer_bounds[self.name_dict[d]] = [lower_bounds[d], upper_bounds[d]]
 
         # create new_x here since batch may change
+        ind = 0 if self.x.ptb.x_L.shape[0] != batch * 2 + diving_batch else Ellipsis
         ptb = PerturbationLpNorm(norm=self.x.ptb.norm, eps=self.x.ptb.eps,
-                                 x_L=self.x.ptb.x_L[0].expand(batch * 2 + diving_batch, *[-1]*(self.x.ptb.x_L.ndim-1)),
-                                 x_U=self.x.ptb.x_U[0].expand(batch * 2 + diving_batch, *[-1]*(self.x.ptb.x_L.ndim-1)))
+                                x_L=self.x.ptb.x_L[ind].expand(batch * 2 + diving_batch, *[-1]*(self.x.ptb.x_L.ndim-1)),
+                                x_U=self.x.ptb.x_U[ind].expand(batch * 2 + diving_batch, *[-1]*(self.x.ptb.x_L.ndim-1)))
         new_x = BoundedTensor(self.x.data.expand(batch * 2 + diving_batch, *[-1]*(self.x.data.ndim-1)), ptb)
         if cs is None:
             c = None if self.c is None else self.c.expand(new_x.shape[0], -1, -1)
@@ -746,7 +740,7 @@ class LiRPAConvNet:
 
         if len(slopes) > 0:
             # set slope here again
-            self.set_slope(self.net, slopes, diving_batch=diving_batch)
+            self.set_slope(self.net, slopes, diving_batch=diving_batch, set_all=enable_opt_interm_bounds)
 
         if decision_thresh is not None and isinstance(decision_thresh, torch.Tensor) and decision_thresh.numel() > 1:
             decision_thresh = torch.cat([decision_thresh, decision_thresh], dim=0)
@@ -763,7 +757,7 @@ class LiRPAConvNet:
                                                              'enable_opt_interm_bounds': enable_opt_interm_bounds,})
             with torch.no_grad():
                 lb, _, = self.net.compute_bounds(x=(new_x,), C=c, method='backward', reuse_alpha=True,
-                                                 intermediate_layer_bounds=new_intermediate_layer_bounds, bound_upper=False, sample_left_idx=sample_left_idx, sample_right_idx=sample_right_idx)
+                                                 intermediate_layer_bounds=new_intermediate_layer_bounds, bound_upper=False, samples=samples)
             return lb
 
         # return_A = True if get_upper_bound else False  # we need A matrix to construct adv example
@@ -791,12 +785,12 @@ class LiRPAConvNet:
             for name in kept_layer_names:
                 print(f'Removing intermediate layer bounds for layer {name}.')
                 del new_intermediate_layer_bounds[name]
-            print(new_x.shape, c.shape, decision_thresh.shape if decision_thresh is not None else None)
+            # print(new_x.shape, c.shape, decision_thresh.shape if decision_thresh is not None else None)
             tmp_ret = self.net.compute_bounds(
                 x=(new_x,), C=c, method='CROWN-Optimized',
                 intermediate_layer_bounds=new_intermediate_layer_bounds,
                 return_A=return_A, needed_A_dict=self.needed_A_dict, cutter=self.cutter,
-                bound_lower=bound_lower, bound_upper=bound_upper, decision_thresh=decision_thresh, opt_poly_vol=False, opt_relu_poly=True, sample_left_idx=sample_left_idx, sample_right_idx=sample_right_idx)
+                bound_lower=bound_lower, bound_upper=bound_upper, decision_thresh=decision_thresh, opt_poly_vol=False, opt_relu_poly=True, samples=samples)
             beta_bound_time += time.time() - start_beta_bound_time
             # we don't care about the upper bound of the last layer
         else:
@@ -1058,7 +1052,7 @@ class LiRPAConvNet:
             print("Warning: Cuts should either be automatically generated by enabling specifying --cut_method or manually given by --tmp_cuts")
             exit()
 
-    def build_the_model(self, input_domain, x, data_lb=None, data_ub=None, vnnlib=None, stop_criterion_func=stop_criterion_sum(0), bounding_method=None, opt_input_poly=False, opt_relu_poly=False):
+    def build_the_model(self, input_domain, x, data_lb=None, data_ub=None, vnnlib=None, stop_criterion_func=stop_criterion_sum(0), bounding_method=None, opt_input_poly=False, opt_relu_poly=False, samples=None):
         """
             return_crown_bounds is only used by incomplete_verifier
         """
@@ -1162,7 +1156,7 @@ class LiRPAConvNet:
                 prune_after_crown_overhead += time.time() - stime
                 print('prune_after_crown optimization in use: original label size =', final_layer_lb.shape[0], 'pruned label size =', len(unverified_label_mask))
 
-            ret = self.net.compute_bounds(x=(x,), C=c_to_use, method='CROWN-Optimized',
+            ret = self.net.compute_bounds(x=(x,), C=c_to_use, method='CROWN-Optimized', samples=samples,
                 return_A=self.return_A, needed_A_dict=self.needed_A_dict, bound_lower=bound_lower,
                 bound_upper=bound_upper, aux_reference_bounds=aux_reference_bounds, cutter=self.cutter,opt_poly_vol=opt_input_poly,opt_relu_poly=opt_relu_poly)
         elif bounding_method == 'alpha-forward':

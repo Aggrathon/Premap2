@@ -1,57 +1,12 @@
 import json
 import math
 import numpy as np
-import os
 import torch
-from torch import autograd
 from torch.distributions import Uniform
 from .utils import logger, eyeC
 from .patches import Patches, patches_to_matrix
 from .linear_bound import LinearBound
-# import preimage_arguments
-import arguments
-import pickle
-def load_act_vecs(dataset_tp):
-    # if arguments.Config["model"]["onnx_path"] is None:
-    act_file = os.path.join(arguments.Config['preimage']["sample_dir"], 'act_vec_{}_{}.pkl'.format(dataset_tp, arguments.Config["preimage"]["atk_tp"]))
-    with open(act_file, 'rb') as f:
-        activation = pickle.load(f)
-    if "MNIST" in dataset_tp:
-        pre_relu_layer = ['2', '4', '6', '8', '10']
-    elif "auto_park" in dataset_tp:
-        pre_relu_layer = ['2']
-    elif "vcas" in dataset_tp:
-        pre_relu_layer = ["H0"]
-    elif dataset_tp == 'cartpole' or dataset_tp == "lunarlander":
-        pre_relu_layer = ['8', '10']
-    elif "dubinsrejoin" in dataset_tp:
-        pre_relu_layer = ["StatefulPartitionedCall/sequential/dense/BiasAdd:0",  "StatefulPartitionedCall/sequential/dense_1/BiasAdd:0"]
-    acti_vecs = []
-    for i, layer in enumerate(pre_relu_layer):
-        act_vec = activation[layer].cpu().detach().numpy()
-        acti_vecs.append(act_vec)
-    return acti_vecs
-
-def calc_history_idxs(acti_vecs, part_history):
-    sample_part = None
-    for i, layer_info in enumerate(part_history): # enumerate over relu layers
-        neuron_idxs = layer_info[0]
-        if len(neuron_idxs) == 0:
-            continue
-        neuron_signs = layer_info[1]
-        for j, neuron_id in enumerate(neuron_idxs):
-            neuron_sign = neuron_signs[j]
-            if neuron_sign == +1:
-                temp_idx = np.where(acti_vecs[i][:, neuron_id]>=0)[0]
-            elif neuron_sign == -1:
-                temp_idx = np.where(acti_vecs[i][:, neuron_id]<0)[0]
-            else:
-                print("neuron sign assignment error")
-            if sample_part is None:
-                sample_part = set(temp_idx)
-            else:
-                sample_part = sample_part.intersection(set(temp_idx))
-    return sample_part
+ 
 class Perturbation:
     r"""
     Base class for a perturbation specification. Please see examples
@@ -267,6 +222,7 @@ class PerturbationLpNorm(Perturbation):
                 # Merge beta into the bias term. Output has size (batch, spec).
                 extra_bias = torch.einsum('ijk,ik->ij', beta, beta_bias)
         if self.norm == np.inf:
+            import arguments
             # For Linfinity distortion, when an upper and lower bound is given, we use them instead of eps.
             # if arguments.Config["model"]["onnx_path"] is None:
             #     sample_file = os.path.join(arguments.Config["preimage"]["sample_dir"], 'sample_{}.pt'.format(arguments.Config["data"]["dataset"]))
@@ -327,7 +283,7 @@ class PerturbationLpNorm(Perturbation):
         return bound
     
     # If A is an identity matrix, we will handle specially.
-    def concretize_matrix_relu_poly(self, x, A, bias, sign, extra_constr, sample_left_idx, sample_right_idx, debug=False):
+    def concretize_matrix_relu_poly(self, x, A, bias, sign, extra_constr, samples, debug=False):
         if not isinstance(A, eyeC):
             # A has (Batch, spec, *input_size). For intermediate neurons, spec is *neuron_size.
             A = A.reshape(A.shape[0], A.shape[1], -1)
@@ -348,104 +304,19 @@ class PerturbationLpNorm(Perturbation):
                 extra_bias = torch.einsum('ijk,ik->ij', beta, beta_bias)
         if self.norm == np.inf:
             # For Linfinity distortion, when an upper and lower bound is given, we use them instead of eps.
-            if arguments.Config["model"]["onnx_path"] is None:
-                sample_file = os.path.join(arguments.Config["preimage"]["sample_dir"], 'sample_{}_{}.pt'.format(arguments.Config["data"]["dataset"], arguments.Config["preimage"]["atk_tp"]))
-                prop_samples = torch.load(sample_file)
-                prop_samples = prop_samples.reshape(prop_samples.shape[0], -1)
-                # sample_left_idx_file = os.path.join(arguments.Config["preimage"]["sample_dir"],'sample_left_{}_{}.pt'.format(arguments.Config["data"]["dataset"], arguments.Config["preimage"]["atk_tp"]))
-                # sample_right_idx_file = os.path.join(arguments.Config["preimage"]["sample_dir"],'sample_right_{}_{}.pt'.format(arguments.Config["data"]["dataset"], arguments.Config["preimage"]["atk_tp"]))
-            else:
-                if arguments.Config["data"]["dataset"] == "vcas":
-                    samples = np.load(os.path.join(arguments.Config["preimage"]["sample_dir"], "sample_{}_{}.npy".format(arguments.Config["data"]["dataset"], arguments.Config["preimage"]["upper_time_loss"])))
-                else:
-                    samples = np.load(os.path.join(arguments.Config["preimage"]["sample_dir"], "sample_{}.npy".format(arguments.Config["data"]["dataset"])))
-                prop_samples = np.squeeze(samples, axis=1)
-                prop_samples = torch.tensor(prop_samples).to(arguments.Config["general"]["device"])
-                # sample_left_idx_file = os.path.join(arguments.Config["preimage"]["sample_dir"],'sample_left_{}.pt'.format(arguments.Config["data"]["dataset"]))
-                # sample_right_idx_file = os.path.join(arguments.Config["preimage"]["sample_dir"],'sample_right_{}.pt'.format(arguments.Config["data"]["dataset"]))
-            # if not os.path.exists(sample_left_idx_file):                
-            #     acti_vecs = load_act_vecs(arguments.Config["data"]["dataset"])
-            #     sample_left_idx = calc_history_idxs(acti_vecs, left_history)
-            #     sample_right_idx = calc_history_idxs(acti_vecs, right_history)
-            #     with open(sample_left_idx_file, 'wb') as f:
-            #         pickle.dump(sample_left_idx, f)
-            #     with open(sample_right_idx_file, 'wb') as f:
-            #         pickle.dump(sample_right_idx, f)
-            # else:
-            #     with open(sample_left_idx_file, 'rb') as f:
-            #         sample_left_idx = pickle.load(f)
-            #     with open(sample_right_idx_file, 'rb') as f:
-            #         sample_right_idx = pickle.load(f)
+            assert samples is not None
             bound = None
             if not isinstance(A, eyeC):
-                # for i in range(prop_samples.shape[1]):
-                # samples_tmp = prop_samples[:,0,:]
-                # for i in range(A.shape[0]):
-                if debug:
-                    if (sample_left_idx is None) and (sample_right_idx is None):
-                        # Test on one single sample
-                        prop_samples = prop_samples[0].reshape(-1, prop_samples.shape[1])
-                        samples_tmp = torch.transpose(prop_samples,0,1)
-                        bound_tmp = A[0].matmul(samples_tmp)+bias[0]
-                        bound = torch.transpose(bound_tmp, 0, 1)
-                        bound = torch.sigmoid(bound)
-                        # bound = torch.mean(bound)
-                        bound = torch.mean(bound).reshape(-1, bound.shape[1])
-                    else:
-                        if len(sample_left_idx)>0:
-                            samples_left = prop_samples[list(sample_left_idx)]
-                            # Test on one single sample
-                            samples_left = samples_left[0].reshape(-1, samples_left.shape[1])
-                            samples_left = torch.transpose(samples_left,0,1)
-                            bound_tmp = A[0].matmul(samples_left)+bias[0]
-                            bound = torch.transpose(bound_tmp, 0, 1)
-                            bound = torch.sigmoid(bound)
-                            
-                        if len(sample_right_idx)>0:
-                            samples_right = prop_samples[list(sample_right_idx)]
-                            samples_right = samples_right[0].reshape(-1, samples_right.shape[1])
-                            samples_right = torch.transpose(samples_right,0,1)
-                            if bound is None:
-                                bound_tmp = A[1].matmul(samples_right)+bias[1]
-                                bound = torch.transpose(bound_tmp, 0, 1)
-                                bound = torch.sigmoid(bound)
-                                bound = torch.mean(bound)
-                            else:
-                                bound_tmp = A[1].matmul(samples_right) + bias[1]
-                                bound_tmp = torch.transpose(bound_tmp, 0, 1)
-                                bound_tmp = torch.sigmoid(bound_tmp)
-                                # bound_tmp = torch.mean(bound_tmp)
-                                bound = torch.vstack((bound, bound_tmp))
-                        if len(sample_left_idx) == 0 and len(sample_right_idx) == 0:
-                            print("no left and no right samples")
-                else:
-                    if (sample_left_idx is None) and (sample_right_idx is None):
-                        samples_tmp = torch.transpose(prop_samples,0,1)
-                        bound_tmp = A[0].matmul(samples_tmp)+bias[0]
-                        bound = torch.transpose(bound_tmp, 0, 1)
-                    else:
-                        if len(sample_left_idx)>0:
-                            samples_left = prop_samples[list(sample_left_idx)]
-                            samples_left = torch.transpose(samples_left,0,1)
-                            bound_tmp = A[0].matmul(samples_left)+bias[0]
-                            bound = torch.transpose(bound_tmp, 0, 1)
-                        if len(sample_right_idx)>0:
-                            samples_right = prop_samples[list(sample_right_idx)]
-                            samples_right = torch.transpose(samples_right,0,1)
-                            if bound is None:
-                                bound_tmp = A[1].matmul(samples_right)+bias[1]
-                                bound = torch.transpose(bound_tmp, 0, 1)
-                            else:
-                                bound_tmp = A[1].matmul(samples_right)+bias[1]
-                                bound_tmp = torch.transpose(bound_tmp, 0, 1)
-                                bound = torch.vstack((bound, bound_tmp))
-                        if len(sample_left_idx) == 0 and len(sample_right_idx) == 0:
-                            print("no left and no right samples")
+                bound = [
+                    torch.sigmoid(torch.einsum('oi,ni->no', bA, bs.X[:bs.num//2].flatten(1)) + bb[None]).mean()
+                    for bA, bb, bs in zip(A, bias, samples)
+                ]
+                bound = sum(bound)
             else:
                 assert extra_constr is None
                 # A is an identity matrix. No need to do this matmul.
                 # bound = center + sign * diff
-                bound = prop_samples.unsqueeze(0)
+                bound = samples.X.unsqueeze(0)
         else:
             assert extra_constr is None
             x = x.reshape(x.shape[0], -1, 1)
@@ -460,19 +331,12 @@ class PerturbationLpNorm(Perturbation):
         # bound = bound.squeeze(-1)
         # print('check bound shape', bound.shape)
         # bound = bound.squeeze(0)
-        if (sample_left_idx is None) and (sample_right_idx is None):
-            return bound
-        else:
-            if debug:
-                return bound
-            else:
-                return bound
+        return bound
             
 
 
     # If A is an identity matrix, we will handle specially.
     def concretize_matrix_poly_LSE(self, x, A, bias, sign, extra_constr, sample_num=1000):
-        spec_num = arguments.Config["bab"]["initial_max_domains"]
         if not isinstance(A, eyeC):
             # A has (Batch, spec, *input_size). For intermediate neurons, spec is *neuron_size.
             A = A.reshape(A.shape[0], A.shape[1], -1)
@@ -492,6 +356,8 @@ class PerturbationLpNorm(Perturbation):
                 # Merge beta into the bias term. Output has size (batch, spec).
                 extra_bias = torch.einsum('ijk,ik->ij', beta, beta_bias)
         if self.norm == np.inf:
+            import arguments
+            spec_num = arguments.Config["bab"]["initial_max_domains"]
             # For Linfinity distortion, when an upper and lower bound is given, we use them instead of eps.
             x_L, x_U = self.get_input_bounds(x, A)
             # x_ub = x_U.reshape(x_U.shape[0], -1, 1)
@@ -624,13 +490,13 @@ class PerturbationLpNorm(Perturbation):
         else:
             raise NotImplementedError()
         
-    def concretize_relu_poly_vol(self, x, A, bias, sign=-1, aux=None, extra_constr=None, sample_left_idx=None, sample_right_idx=None):
+    def concretize_relu_poly_vol(self, x, A, bias, sign=-1, aux=None, extra_constr=None, samples=None):
         if A is None:
             return None
         if isinstance(A, eyeC) or isinstance(A, torch.Tensor):
-            return self.concretize_matrix_relu_poly(x, A, bias, sign, extra_constr, sample_left_idx, sample_right_idx)
+            return self.concretize_matrix_relu_poly(x, A, bias, sign, extra_constr, samples)
         elif isinstance(A, Patches):
-            return self.concretize_patches(x, A, sign, extra_constr)
+            raise NotImplementedError()
         else:
             raise NotImplementedError()
     """Given an variable x and its bound matrix A, compute approximated volume based on samples and continuous relaxation."""

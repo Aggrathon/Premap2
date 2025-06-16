@@ -8,7 +8,6 @@ import torch
 from torch import optim
 from .cuda_utils import double2float
 
-import arguments
 
 def _set_alpha(optimizable_activations, parameters, alphas, lr):
     """
@@ -411,7 +410,7 @@ def get_optimized_bounds(
         reuse_ibp=False, return_A=False, average_A=False, final_node_name=None,
         intermediate_layer_bounds=None, reference_bounds=None,
         aux_reference_bounds=None, needed_A_dict=None, cutter=None,
-        decision_thresh=None, epsilon_over_decision_thresh=1e-4,opt_poly_vol=False,opt_relu_poly=False, sample_left_idx=None, sample_right_idx=None):
+        decision_thresh=None, epsilon_over_decision_thresh=1e-4,opt_poly_vol=False,opt_relu_poly=False, samples=None):
     """
     Optimize CROWN lower/upper bounds by alpha and/or beta.
     """
@@ -427,7 +426,6 @@ def get_optimized_bounds(
     assert single_node_split is True
     keep_best = opts['keep_best']
     fix_intermediate_layer_bounds = opts['fix_intermediate_layer_bounds']
-    print('check fix intermediate bounds', fix_intermediate_layer_bounds)
     init_alpha = opts['init_alpha']
     lr_alpha = opts['lr_alpha']
     lr_beta = opts['lr_beta']
@@ -595,7 +593,7 @@ def get_optimized_bounds(
                 # corresponding A matrices and biases.
                 intermediate_constr=intermediate_constr,
                 needed_A_dict=needed_A_dict,
-                update_mask=preserve_mask, opt_poly_vol=opt_poly_vol, opt_relu_poly=opt_relu_poly, sample_left_idx=sample_left_idx, sample_right_idx=sample_right_idx)
+                update_mask=preserve_mask, opt_poly_vol=opt_poly_vol, opt_relu_poly=opt_relu_poly, samples=samples)
 
         ret_l, ret_u = ret[0], ret[1]
         # ret_l, ret_u = ret[3], ret[4]
@@ -892,6 +890,7 @@ def get_optimized_bounds(
 
         if beta:
             # Clipping to >=0.
+            import arguments
             if not arguments.Config["preimage"]["smooth_beta"]:
                 for b in betas:
                     b.data = (b >= 0) * b.data

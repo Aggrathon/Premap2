@@ -778,6 +778,7 @@ class BoundRelu(BoundOptimizableActivation):
                     beta_indices = self.sparse_beta_loc[start_node.name].unsqueeze(0).expand(lA.size(0), -1, -1)
                 else:
                     # For matrix mode, beta is sparse.
+                    import arguments
                     if arguments.Config["preimage"]["smooth_beta"]:
                         beta_values = (torch.exp(self.sparse_beta) * self.sparse_beta_sign).expand(lA.size(0), -1, -1)
                         beta_indices = self.sparse_beta_loc.unsqueeze(0).expand(lA.size(0), -1, -1)

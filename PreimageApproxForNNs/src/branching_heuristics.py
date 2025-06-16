@@ -168,56 +168,27 @@ def choose_node_conv(lower_bounds, upper_bounds, orig_mask, layers, pre_relu_ind
 def choose_node_parallel_preimg(mask_sample, score_relus, lower_bounds, upper_bounds, orig_mask, net, pre_relu_indices, sparsest_layer=0,
                                decision_threshold=0.001, batch=5, branching_reduceop='min', split_depth=1, cs=None, rhs=0):
     batch = min(batch, len(orig_mask[0]))
-    # Mask is 1 for unstable neurons. Otherwise it's 0.
-    mask = mask_sample
-    reduce_op = get_branching_op(branching_reduceop)
-    number_bounds = 1 if cs is None else cs.shape[1]
-    
     decision = [[] for _ in range(batch)]
     # score has been calculated before
-    random_dict = {}
     for b in range(batch):
-        mask_item = [m[b] for m in mask]
-        new_score = [score_relus[j][b] for j in range(len(score_relus))]
+        # mask_sample is 1 for unstable neurons. Otherwise it's 0.
+        mask_item = [m[min(b, len(m)-1)] for m in mask_sample]
+        new_score = [s[min(b, len(s)-1)] for s in score_relus]
         # So the difference from other score is that the score here is only the number of unstable neurons
         split_depth = min(split_depth, new_score[0].shape[0]) 
-        max_info = [torch.topk(i, split_depth, 0) for i in new_score]
+        max_info = [torch.topk(i.ravel(), split_depth, 0) for i in new_score]
 
         max_info_index = [a[1] for a in max_info]
-        max_info = [a[0] for a in max_info] # [num_layer, split_depth]
+        max_info = [a[0].ravel() for a in max_info] # [num_layer, split_depth]
 
         max_info_top_k_value, max_info_top_k_index = torch.topk(torch.cat(max_info, dim=0), split_depth)
 
         for l in range(split_depth):
             decision_layer = max_info_top_k_index[l].item() // split_depth
-            decision_index = max_info_index[decision_layer][max_info_top_k_index[l] % split_depth].item()
+            decision_index = max_info_index[decision_layer].flatten()[max_info_top_k_index[l] % split_depth].item()
 
-            # if decision_layer != sparsest_layer:# and max_info[decision_layer][0].item() > decision_threshold:
             decision[b].append((decision_layer, decision_index))
-            mask_item[decision_layer][decision_index] = 0
-            # else:
-                # min_info = [[i, torch.min(intercept_tb[i][b], 0)] for i in range(len(intercept_tb)) if
-                #             torch.min(intercept_tb[i][b]) < -1e-4]
-
-                # global Icp_score_counter
-                # if len(min_info) != 0 and Icp_score_counter < 2 and (min_info[-1][0], min_info[-1][1][1].item()) not in decision[b]:
-                #     intercept_layer = min_info[-1][0]
-                #     intercept_index = min_info[-1][1][1].item()
-                #     Icp_score_counter += 1
-                #     decision[b].append((intercept_layer, intercept_index))
-                #     mask_item[intercept_layer][intercept_index] = 0
-                #     if intercept_layer != 0:
-                #         Icp_score_counter = 0
-                # else:
-                # random_dict[b] = random_dict.get(b, 0) + 1
-                # for preferred_layer in np.random.choice(len(pre_relu_indices), len(pre_relu_indices), replace=False):
-                #     if len(mask_item[preferred_layer].nonzero(as_tuple=False)) != 0:
-                #         decision[b].append((preferred_layer, mask_item[preferred_layer].nonzero(as_tuple=False)[0].item()))
-                #         mask_item[decision[b][-1][0]][decision[b][-1][1]] = 0
-                #         break
-                # Icp_score_counter = 0
-    if random_dict:
-            print(f'Random branching decision used for {{example_idx:n_random}}: {random_dict}')
+            mask_item[decision_layer][np.unravel_index(decision_index, mask_item[decision_layer].shape)] = 0
 
     split_depth = min([len(d) for d in decision])
 

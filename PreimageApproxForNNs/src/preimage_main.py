@@ -7,6 +7,7 @@
 """ Preimage generation main interface."""
 
 import copy
+import re
 import socket
 import random
 import time
@@ -27,7 +28,6 @@ from utils import parse_run_mode
 # from nn4sys_verification import nn4sys_verification
 # NOTE use batch_approx
 from preimage_batch_approx_relu_split import relu_bab_parallel
-from preimage_batch_approx_relu_split_dual import relu_bab_parallel_dual
 from preimage_batch_approx_input_split import input_bab_approx_parallel_multi
 
 from read_vnnlib import batch_vnnlib, read_vnnlib
@@ -187,20 +187,14 @@ def bab(unwrapped_model, data, targets, y, data_ub, data_lb,
     if cut_enabled:
         model.set_cuts(model_incomplete.A_saved, x, lower_bounds, upper_bounds)
 
+    path = None
     if arguments.Config["bab"]["branching"]["input_split"]["enable"]:
         covered, preimage_dict, nb_visited, time_cost, iter_cov_quota, subdomain_num = input_bab_approx_parallel_multi(
             model, domain, x, model_ori=unwrapped_model, all_prop=all_prop,
             rhs=rhs, timeout=timeout, branching_method=arguments.Config["bab"]["branching"]["method"])
-    elif arguments.Config["solver"]["beta-crown"]["beta"]:
-        covered, preimage_dict, nb_visited, time_cost, iter_cov_quota, subdomain_num = relu_bab_parallel_dual(
-            model, domain, x,y,
-            refined_lower_bounds=lower_bounds, refined_upper_bounds=upper_bounds,
-            activation_opt_params=activation_opt_params, reference_lA=reference_lA,
-            reference_slopes=reference_slopes, attack_images=attack_images,
-            timeout=timeout, refined_betas=refined_betas, rhs=rhs)   
     else:
-        covered, preimage_dict, nb_visited, time_cost, iter_cov_quota, subdomain_num = relu_bab_parallel(
-            model, domain, x,y,
+        covered, preimage_dict, nb_visited, time_cost, iter_cov_quota, subdomain_num, path = relu_bab_parallel(
+            model, domain, x,
             refined_lower_bounds=lower_bounds, refined_upper_bounds=upper_bounds,
             activation_opt_params=activation_opt_params, reference_lA=reference_lA,
             reference_slopes=reference_slopes, attack_images=attack_images,
@@ -218,7 +212,7 @@ def bab(unwrapped_model, data, targets, y, data_ub, data_lb,
     #     save_file = os.path.join(save_path,'{}_atk_{}'.format(arguments.Config["data"]["dataset"], arguments.Config["preimage"]["atk_tp"]))
     #     with open(save_file, 'wb') as f:
     #         pickle.dump(preimage_dict, f) 
-    return covered, preimage_dict, nb_visited, time_cost, iter_cov_quota, subdomain_num
+    return covered, preimage_dict, nb_visited, time_cost, iter_cov_quota, subdomain_num, path
 
 
 def update_parameters(model, data_min, data_max):
@@ -385,7 +379,7 @@ def preimage_workflow(
             lower_bounds[-1] = lower_bounds[-1][init_failure_idx]
             upper_bounds[-1] = upper_bounds[-1][init_failure_idx]
             # TODO change index [0:1] to [torch.where(~init_verified_cond)[0]] can handle more general vnnlib for multiple x
-            l, u, nodes, glb_record, ret = bab(
+            l, u, nodes, glb_record, ret, path = bab(
                 model_ori, x[0:1], init_failure_idx, y=np.unique(y),
                 data_ub=data_max[0:1], data_lb=data_min[0:1],
                 lower_bounds=lower_bounds, upper_bounds=upper_bounds,
@@ -399,13 +393,13 @@ def preimage_workflow(
             assert arguments.Config["general"]["complete_verifier"] == "bab"  # for MIP and BaB-Refine.
             assert not arguments.Config["bab"]["attack"]["enabled"], "BaB-attack must be used with incomplete verifier."
             # input split also goes here directly
-            covered, preimage_dict, nb_visited, time_cost, iter_cov_quota, subdomain_num = bab(
+            covered, preimage_dict, nb_visited, time_cost, iter_cov_quota, subdomain_num, path = bab(
                 model_ori, x, pidx, y, data_ub=data_max, data_lb=data_min, c=c,
                 all_prop=target_label_arrays, cplex_processes=cplex_processes,
                 rhs=rhs, timeout=timeout, attack_images=this_spec_attack_images)
             print("#Subdomain: {}, \n Coverage: {:.3f}, \n Time cost: {:.3f}".format(subdomain_num, iter_cov_quota[-1], time_cost))
             # bab_ret.append([index, l, nodes, time.time() - start_time_bab, pidx])
-    return subdomain_num, time_cost, iter_cov_quota
+    return subdomain_num, time_cost, iter_cov_quota, path
         # # terminate the corresponding cut inquiry process if exists
         # if cplex_cuts:
         #     solved_c_rows.append(c)
@@ -460,6 +454,7 @@ def main():
     bab_ret = []
     select_instance = arguments.Config["data"]["select_instance"]
 
+    paths =[]
     for new_idx, csv_item in enumerate(example_idx_list):
         arguments.Globals["example_idx"] = new_idx
         vnnlib_id = new_idx + arguments.Config["data"]["start"]
@@ -562,13 +557,14 @@ def main():
             # BaB bounds. (not do bab if unknown by mip solver for now)
             if not verified_success and arguments.Config["general"]["complete_verifier"] != "skip" and verified_status != "unknown-mip":
                 batched_vnnlib = batch_vnnlib(vnnlib)
-                subdomain_num, time_cost, iter_cov_quota  = preimage_workflow(
+                subdomain_num, time_cost, iter_cov_quota, path  = preimage_workflow(
                     model_ori, model_incomplete, batched_vnnlib, vnnlib, vnnlib_shape,
                     init_global_lb, lower_bounds, upper_bounds, new_idx,
                     timeout_threshold=timeout_threshold - (time.time() - start_time),
                     bab_ret=bab_ret, lA=lA, cplex_processes=cplex_processes,
                     reference_slopes=saved_slopes, activation_opt_params=activation_opt_params,
                     refined_betas=refined_betas, attack_images=all_adv_candidates, attack_margins=attack_margins)
+                paths.append(path)
 
                 print('--- Preimage Generation ends ---')
 
@@ -576,6 +572,10 @@ def main():
 
         # Summarize results.
         dataset_tp = arguments.Config["data"]["dataset"]
+        if not isinstance(dataset_tp, str):
+            dataset_tp = arguments.Config["model"]["name"]
+            if not isinstance(dataset_tp, (str, type(None))):
+                dataset_tp = ".".join((type(dataset_tp).__module__, type(dataset_tp).__qualname__))
         split_input_aligned = arguments.Config["bab"]["branching"]["input_split"]["enable"]
         dual_param_enabled = arguments.Config["solver"]["beta-crown"]["beta"]
         preimage_over = arguments.Config["preimage"]["over_approx"]
@@ -586,6 +586,7 @@ def main():
         print(f'Using result directory: {arguments.Config["preimage"]["result_dir"]}')
         if not os.path.exists(arguments.Config["preimage"]["result_dir"]):
             os.makedirs(arguments.Config["preimage"]["result_dir"])
+        dataset_tp = re.sub('\\W', '_', dataset_tp)
         if 'MNIST' in dataset_tp:
             if arguments.Config["preimage"]["worst_beta"]:
                 log_file = os.path.join(arguments.Config["preimage"]["result_dir"], '{}_{}_img_{}_beta_worst_{}.txt'.format(dataset_tp, arguments.Config["model"]["name"], arguments.Config["data"]["start"], arguments.Config["preimage"]["worst_beta"]))
@@ -598,6 +599,7 @@ def main():
                 log_file = os.path.join(arguments.Config["preimage"]["result_dir"], '{}_input_enable_{}_beta_{}_worst.txt'.format(dataset_tp, split_input_aligned, dual_param_enabled))
             else:
                 log_file = os.path.join(arguments.Config["preimage"]["result_dir"], '{}_input_enable_{}_beta_{}.txt'.format(dataset_tp, split_input_aligned, dual_param_enabled))
+        dataset_tp = arguments.Config["data"]["dataset"]
         if dataset_tp == 'vcas':
             with open(log_file, "a") as f:
                 f.write("VCAS-21-{}, Over {}, Under {}, Spec {}, upper_time_loss {}, -- #Subdomain: {}, Time: {:.3f}, Coverage: {:.3f}  \n".format(arguments.Config["preimage"]["vcas_idx"], preimage_over, preimage_under, 
@@ -627,9 +629,14 @@ def main():
                     subdomain_num, time_cost, iter_cov_quota[-1]))
         else:
             with open(log_file, "a") as f:
-                f.write("{}, Over {}, Under {}, Spec {}, Runner {}, -- #Subdomain: {}, Time: {:.3f}, Coverage: {:.3f} \n".format(dataset_tp, preimage_over, preimage_under, 
-                arguments.Config["preimage"]["label"], arguments.Config["preimage"]["runner_up"], subdomain_num, time_cost, iter_cov_quota[-1]))
+                approx = 'Over' if preimage_over else 'Under' if preimage_under else ''
+                attack = arguments.Config['preimage']['atk_tp']
+                if "patch" in attack:
+                    attack = f'{attack}({arguments.Config["preimage"]["patch_h"]},{arguments.Config["preimage"]["patch_v"]},{arguments.Config["preimage"]["patch_width"]},{arguments.Config["preimage"]["patch_len"]})'
+                f.write(f"{dataset_tp} -- #Subdomain: {subdomain_num}, Time: {time_cost:.3f}, Coverage: {iter_cov_quota[-1]:.3f}")
+                f.write(f" -- {approx}, Attack: {attack}, Label: {arguments.Config['preimage']['label']}, Runnerup: {arguments.Config['preimage']['runner_up']} \n")
         print('--- Log ends ---')
+    return paths
 
 
 if __name__ == "__main__":

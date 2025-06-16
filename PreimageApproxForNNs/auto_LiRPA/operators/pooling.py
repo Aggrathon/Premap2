@@ -47,6 +47,8 @@ class BoundMaxPool(BoundOptimizableActivation):
             if ns == '_forward':
                 warnings.warn("MaxPool's optimization is not supported for forward mode")
                 continue
+            if not isinstance(size_s, int):
+                size_s = np.prod(size_s)
             self.alpha[ns] = torch.empty(
                 [1, size_s, self.input_shape[0], self.input_shape[1], 
                 self.output_shape[-2], self.output_shape[-1], 
@@ -476,7 +478,7 @@ class BoundAveragePool(Bound):
             if isinstance(last_A, torch.Tensor):
                 shape = last_A.size()
                 # propagate A to the next layer, with batch concatenated together
-                next_A = F.interpolate(last_A.view(shape[0] * shape[1], *shape[2:]),
+                next_A = F.interpolate(last_A.reshape(shape[0] * shape[1], *shape[2:]),
                     scale_factor=self.kernel_size) / (prod(self.kernel_size))
                 next_A = F.pad(next_A, (0, self.input_shape[-2] - next_A.shape[-2], 0, self.input_shape[-1] - next_A.shape[-1]))
                 next_A = next_A.view(shape[0], shape[1], *next_A.shape[1:])
@@ -493,7 +495,7 @@ class BoundAveragePool(Bound):
                     # No inserted zeros, can be handled using interpolate.
                     if last_A.unstable_idx is None:
                         # shape is: [out_C, batch, out_H, out_W, in_c, patch_H, patch_W]
-                        up_sampled_patches = F.interpolate(patches.view(shape[0] * shape[1], shape[2] * shape[3], *shape[4:]), scale_factor=[1,] + self.kernel_size)
+                        up_sampled_patches = F.interpolate(patches.reshape(shape[0] * shape[1], shape[2] * shape[3], *shape[4:]), scale_factor=[1,] + self.kernel_size)
                         # The dimension of patch-H and patch_W has changed.
                         up_sampled_patches = up_sampled_patches.view(*shape[:-2], up_sampled_patches.size(-2), up_sampled_patches.size(-1))
                     else:

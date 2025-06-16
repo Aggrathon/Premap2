@@ -16,12 +16,32 @@ When adding new commandline parameters, please make sure to provide a clear and 
 
 import re
 import os
-from secrets import choice
 import sys
+import torch
 import yaml
 import time
 import argparse
 from collections import defaultdict
+
+def str2bool(v: str) -> bool:
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
+def keyvaluef(v:str) -> tuple[str, float]:
+    try:
+        key, value = v.split('=', 1)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"Invalid key-value pair should be in the form 'key=value', got {v}")
+    try:
+        return key, float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"Invalid value for {key}, should be a float, got {value}")
 
 
 class ConfigHandler:
@@ -54,15 +74,15 @@ class ConfigHandler:
         self.add_argument('--config', type=str, help='Path to YAML format config file.', hierarchy=None)
         # Add preimage arguments
         h = ["preimage"]
-        self.add_argument("--sample_dir", type=str, default=None, help='Directory to save and load samples for loss estimation and polytope coverage.',
+        self.add_argument("--sample_dir", type=str, default=None, help='Directory to save and load samples for loss estimation and polytope coverage (deprecated).',
                           hierarchy=h + ["sample_dir"]) 
         self.add_argument("--result_dir", type=str, default=None, help='Result directory to specify for saving your results.',
                           hierarchy=h + ["result_dir"])       
-        self.add_argument("--over_approx", type=bool, default=True, help='To generate preimage over-approximation or not.',
+        self.add_argument("--over_approx", type=str2bool, default=False, help='To generate preimage over-approximation or not.',
                     hierarchy=h + ["over_approx"])
-        self.add_argument("--under_approx", type=bool, default=False, help='To generate preimage under-approximation or not.',
+        self.add_argument("--under_approx", type=str2bool, default=True, help='To generate preimage under-approximation or not.',
                     hierarchy=h + ["under_approx"])
-        self.add_argument("--threshold", type=float, default=1.25, help='Target preimage coverage threshold for termination. No less than 1 for over-approximation and no greater than 1 for under-approximation.',
+        self.add_argument("--threshold", type=float, default=0.9, help='Target preimage coverage threshold for termination. No less than 1 for over-approximation and no greater than 1 for under-approximation.',
                     hierarchy=h + ["threshold"])
         self.add_argument("--label", type=int, default=1, help='Indicate which label to build input preimage for.',
                           hierarchy=h + ["label"])
@@ -84,39 +104,41 @@ class ConfigHandler:
                           hierarchy=h + ["patch_eps"])
         self.add_argument("--l0_norm", type=int, default=24, help='Indicate the l0 norm to build input preimage for.',
                           hierarchy=h + ["l0_norm"])      
-        self.add_argument("--sample_num", type=int, default=10000, help='Sample number to estimate preimage coverage.',
+        self.add_argument("--sample_num", type=int, default=2000, help='Sample number to estimate preimage coverage.',
                           hierarchy=h + ["sample_num"])        
-        self.add_argument("--branch_budget", type=int, default=2000, help='Branching budget to see how many preimage polytopes we set as upper limit.',
+        self.add_argument("--branch_budget", type=int, default=10_000, help='Branching budget to see how many preimage polytopes we set as upper limit.',
                           hierarchy=h + ["branch_budget"])        
-        self.add_argument("--multi_spec", type=bool, default=False, help='The multi specification support for preimage analysis.',
+        self.add_argument("--multi_spec", type=str2bool, default=False, help='The multi specification support for preimage analysis.',
                     hierarchy=h + ["multi_spec"])
-        self.add_argument("--sample_instability", type=bool, default=True, help='Use sampling identified instability for preimage analysis.',
+        self.add_argument("--sample_instability", type=str2bool, default=False, help='Use sampling identified instability for preimage analysis.',
                     hierarchy=h + ["instability"])
-        self.add_argument("--patch", type=bool, default=True, help='The attack type support for image task preimage analysis.',
-                    hierarchy=h + ["patch"])        
-        self.add_argument("--save_process", type=bool, default=False, help='The save preimage polytope support for preimage analysis.',
+        self.add_argument("--save_process", type=str2bool, default=False, help='The save preimage polytope support for preimage analysis.',
                     hierarchy=h + ["save_process"])
-        self.add_argument("--save_cov", type=bool, default=False, help='The save cov quota support through iterations for preimage analysis.',
+        self.add_argument("--save_cov", type=str2bool, default=False, help='The save cov quota support through iterations for preimage analysis.',
                     hierarchy=h + ["save_cov"])
-        self.add_argument("--quant_analysis", type=bool, default=False, help='Whether to do quantitative analysis for preimage.',
+        self.add_argument("--quant_analysis", type=str2bool, default=False, help='Whether to do quantitative analysis for preimage.',
                     hierarchy=h + ["quant"])
-        self.add_argument("--init_beta", type=bool, default=False, help='Whether to use smooth beta.',
+        self.add_argument("--init_beta", type=str2bool, default=False, help='Whether to use smooth beta.',
                     hierarchy=h + ["init_beta"])   
-        self.add_argument("--worst_beta", type=bool, default=False, help='Whether to use worst-case based beta.',
+        self.add_argument("--worst_beta", type=str2bool, default=False, help='Whether to use worst-case based beta.',
                     hierarchy=h + ["worst_beta"])  
-        self.add_argument("--smooth_beta", type=bool, default=False, help='Whether to use smooth beta.',
+        self.add_argument("--smooth_beta", type=str2bool, default=False, help='Whether to use smooth beta.',
                     hierarchy=h + ["smooth_beta"]) 
-        self.add_argument("--compare_split", type=bool, default=False, help='Whether to compare the usefulness of smooth val for input feature selection.',
+        self.add_argument("--compare_split", type=str2bool, default=False, help='Whether to compare the usefulness of smooth val for input feature selection.',
                     hierarchy=h + ["compare_split"])  
-        self.add_argument("--smooth_val", type=bool, default=True, help='Whether to use smooth val for input feature selection.',
+        self.add_argument("--smooth_val", type=str2bool, default=True, help='Whether to use smooth val for input feature selection.',
                     hierarchy=h + ["smooth_val"])      
         self.add_argument("--atk_tp", type=str, default="patch", choices=["patch_eps", "patch", "l0_rand", "l0_sensitive", "l_inf"], help='The pixel attack to specify the input specification.',
-                          hierarchy=h + ["atk_tp"])      
+                          hierarchy=h + ["atk_tp"])
+        self.add_argument('--heuristics', nargs='+', metavar="KEY=VALUE", type=keyvaluef, help='Specify coefficients for the node selection heuristic.',
+                          hierarchy=h + ["heuristics"])
+        self.add_argument("--tighten_bounds", type=str2bool, default=True, help='Whether to tighten intermediate bounds after a split with bound propagation.',
+                    hierarchy=h + ["tighten_bounds"])
         h = ["general"]
-        self.add_argument("--device", type=str, default="cuda", choices=["cpu", "cuda"],
+        self.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", choices=["cpu", "cuda"],
                           help='Select device to run verifier, cpu or cuda (GPU).', hierarchy=h + ["device"])
         self.add_argument("--seed", type=int, default=100, help='Random seed.', hierarchy=h + ["seed"])
-        self.add_argument("--conv_mode", default="matrix", choices=["patches", "matrix"],
+        self.add_argument("--conv_mode", default="patches", choices=["patches", "matrix"],
                           help='Convolution mode during bound propagation: "patches" mode (default) is very efficient, but may not support all architecture; "matrix" mode is slow but supports all architectures.',
                           hierarchy=h + ["conv_mode"])
         self.add_argument("--deterministic", action='store_true',
@@ -298,7 +320,7 @@ class ConfigHandler:
                           help='Number of iteration for optimizing alpha and beta during branch and bound.',
                           hierarchy=h + ["iteration"])
         # set beta to be True for using Lagrangian multipliers for optimisation, False otherwise.
-        self.add_argument('--no_beta', type=bool, default=False,
+        self.add_argument('--no_beta', action='store_false', dest='beta',
                           help='Disable/Enable beta split constraint (this option is for ablation study only and should not be used normally).',
                           hierarchy=h + ["beta"])
         self.add_argument('--no_beta_warmup', action='store_false', dest='beta_warmup',
@@ -344,7 +366,7 @@ class ConfigHandler:
                           help='MIP timeout threshold for improving each intermediate layer bound (in seconds).',
                           hierarchy=h + ["refine_neuron_timeout"])
         self.add_argument('--mip_refine_timeout', type=float, default=0.8,
-                          help='Percentage (x100%) of time used for improving all intermediate layer bounds using mip. Default to be 0.8*timeout.',
+                          help='Percentage (x100%%) of time used for improving all intermediate layer bounds using mip. Default to be 0.8*timeout.',
                           hierarchy=h + ["refine_neuron_time_percentage"])
         self.add_argument('--no_mip_early_stop', action='store_false', dest='mip_early_stop',
                           help='Not early stop when finding a positive lower bound or a adversarial example during MIP.',
@@ -409,7 +431,7 @@ class ConfigHandler:
                           hierarchy=h + ["sb_coeff_thresh"])
         # NOTE set "enable_input_split" to True to enable input split, and False to enable unstable neuron split.
         h = ["bab", "branching", "input_split"]
-        self.add_argument("--enable_input_split", type=bool, default=False,
+        self.add_argument("--enable_input_split", type=str2bool, default=False,
                           help='Branch on input domain rather than unstable neurons.', hierarchy=h + ["enable"])
         self.add_argument('--enhanced_bound_prop_method', default="alpha-crown",
                           choices=["alpha-crown", "crown", "forward+crown", "crown-ibp"],
@@ -569,6 +591,7 @@ class ConfigHandler:
         h = ["debug"]
         self.add_argument("--lp_test", type=str, default=None, choices=["MIP", "LP", None],
                           help='Debugging option. Do not use.', hierarchy=h + ['lp_test'], private=True)
+        self.add_argument("--asserts", action="store_true", help="Enable extra asserts.", hierarchy=h + ['asserts'])
 
     def add_argument(self, *args, **kwargs):
         """Add a single parameter to the parser. We will check the 'hierarchy' specified and then pass the remaining arguments to argparse."""

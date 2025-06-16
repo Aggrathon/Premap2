@@ -64,7 +64,7 @@ def batched_backward(
 
 def backward_general(
         self, C, node=None, bound_lower=True, bound_upper=True, average_A=False,
-        need_A_only=False, unstable_idx=None, unstable_size=0, update_mask=None, verbose=True, opt_input_poly=False, opt_relu_poly=False, sample_left_idx=None, sample_right_idx=None, trans=False):
+        need_A_only=False, unstable_idx=None, unstable_size=0, update_mask=None, verbose=True, opt_input_poly=False, opt_relu_poly=False, samples=None, trans=False):
     if verbose:
         logger.debug(f'Bound backward from {node.__class__.__name__}({node.name})')
         if isinstance(C, str):
@@ -73,7 +73,6 @@ def backward_general(
             logger.debug(f'  C: shape {C.shape}, type {type(C)}')
     _print_time = False
     # add using beta or not
-    worst_beta = arguments.Config["preimage"]["worst_beta"]
     if isinstance(C, str):
         # If C is a str, use batched CROWN. If batched CROWN is not intended to
         # be enabled, C must be a explicitly provided non-str object for this function.
@@ -225,14 +224,16 @@ def backward_general(
         #     bound_lower, bound_upper, average_A=average_A)    
     elif opt_relu_poly:
         vol_relu_lb, vol_relu_ub = concretize_relu_poly_vol(lb, ub, node, self.root, batch_size, output_dim,
-            bound_lower, bound_upper, average_A=average_A, sample_left_idx=sample_left_idx, sample_right_idx=sample_right_idx)    
+            bound_lower, bound_upper, average_A=average_A, samples=samples)    
     
     lb, ub = concretize(
         lb, ub, node, self.root, batch_size, output_dim,
         bound_lower, bound_upper, average_A=average_A)
 
-    if opt_relu_poly and bound_upper and worst_beta:
-        vol_relu_lb, vol_relu_ub = lb, ub
+    if opt_relu_poly and bound_upper:
+        import arguments
+        if arguments.Config["preimage"]["worst_beta"]:
+            vol_relu_lb, vol_relu_ub = lb, ub
 
     # TODO merge into `concretize`
     if self.cut_used and getattr(self, "cut_module", None) is not None and self.cut_module.cut_bias is not None:

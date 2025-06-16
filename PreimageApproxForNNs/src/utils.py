@@ -15,7 +15,6 @@ import torchvision
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 import numpy as np
-import pandas as pd
 import onnx2pytorch
 import onnx
 import onnxruntime as ort
@@ -339,7 +338,10 @@ def load_model(weights_loaded=True):
     assert arguments.Config["model"]["name"] is not None or arguments.Config["model"]["onnx_path"] is not None, (
         "No model is loaded, please set --model <modelname> for pytorch model or --onnx_path <filename> for onnx model.")
 
-    if arguments.Config['model']['name'] is not None:
+    if callable(arguments.Config['model']['name']):
+        model_ori = arguments.Config['model']['name']
+        model_ori.eval()
+    elif arguments.Config['model']['name'] is not None:
         # You can customize this function to load your own model based on model name.
         try:
             model_ori = eval(arguments.Config['model']['name'])()
@@ -814,28 +816,32 @@ def calc_img_specs(attack_tp, img, model=None):
 
 def calc_patch_spec(atk_tp, img, patch_len, patch_wid, dataset="mnist"):
     if atk_tp == 'patch':
-        i = arguments.Config["preimage"]["patch_h"]
-        j = arguments.Config["preimage"]["patch_v"]
+        x = arguments.Config["preimage"]["patch_h"]
+        y = arguments.Config["preimage"]["patch_v"]
         specLB, specUB = get_spec_patch(
-            img, i, j, i + patch_len, j + patch_wid, dataset)   
+            img, x, y, x + patch_wid, y + patch_len, dataset)   
     elif atk_tp == 'patch_eps':
-        i = arguments.Config["preimage"]["patch_h"]
-        j = arguments.Config["preimage"]["patch_v"] 
+        x = arguments.Config["preimage"]["patch_h"]
+        y = arguments.Config["preimage"]["patch_v"] 
         specLB, specUB = get_spec_patch_eps(
-            img, i, j, i + patch_len, j + patch_wid, dataset)          
+            img, x, y, x + patch_wid, y + patch_len, dataset)          
     return specLB, specUB
 def calc_l0_spec_rand(img, l0_norm, dataset="mnist"):
     random.seed(arguments.Config["general"]["seed"])
     specLB = torch.clone(img.detach())
     specUB = torch.clone(img.detach())
-    if dataset == 'mnist':
-        length = 28
-        width = 28
+    if len(img.shape) >= 3:
+        channel_first = (len(img.shape) > 3) and (img.shape[1] < img.shape[3])
+        width, height = img.shape[channel_first + 1 : channel_first + 3]
         for _ in range(l0_norm):
-            x = random.randint(0, length-1)
-            y = random.randint(0, width-1)
-            specLB[0][x * 28 + y] = 0
-            specUB[0][x * 28 + y] = 1
+            x = random.randint(0, width-1)
+            y = random.randint(0, height-1)
+            if channel_first:
+                specLB[0, :, x, y] = 0
+                specUB[0, :, x, y] = 1
+            else:
+                specLB[0, x, y] = 0
+                specUB[0, x, y] = 1
     return specLB, specUB
 def calc_l2_norm(y1, y2):
     val = 0
@@ -847,26 +853,23 @@ def calc_l0_spec_sensitive(model, img):
     specLB = torch.clone(img.detach())
     specUB = torch.clone(img.detach())
     delta = 0.01
-    grad_pix_list = [] 
-    img_shape = [-1, 1, 28, 28]
-    img = img.reshape(img_shape)
+    grad_pix_list = []
     y1 = model(img)
-    for i in range(28):
-        for j in range(28):
-            img[0][0][i][j] += delta
-            y2 = model(img)
-            img[0][0][i][j] -= delta
-            pixel_norm = calc_l2_norm(y1[0], y2[0])
-            grad_pix_list.append((pixel_norm, (i, j)))
+    for i in range(img.shape[1]):
+        for j in range(img.shape[2]):
+            for k in range(img.shape[3]):
+                img[0, i, j, k] += delta
+                y2 = model(img)
+                img[0, i, j, k] -= delta
+                pixel_norm = calc_l2_norm(y1[0], y2[0])
+                grad_pix_list.append((pixel_norm, (i, j, k)))
     grad_pix_list = sorted(grad_pix_list, key=lambda x: x[0], reverse=True)[:l0_norm]
     grad_pix_file = os.path.join(arguments.Config["preimage"]["sample_dir"], "grad_pixel.pkl")
     with open(grad_pix_file, 'wb') as f:
         pickle.dump(grad_pix_list, f)
-    for i in range(l0_norm):
-        x = grad_pix_list[i][1][0]
-        y = grad_pix_list[i][1][1]
-        specLB[0][x * 28 + y] = 0
-        specUB[0][x * 28 + y] = 1
+    for _, (i, j, k) in grad_pix_list:
+        specLB[0, i, j, k] = 0
+        specUB[0, i, j, k] = 1
     return specLB, specUB
                   
     
@@ -874,44 +877,48 @@ def get_spec_patch_eps(image, xs, ys, xe, ye, dataset):
     specLB = torch.clone(image.detach())
     specUB = torch.clone(image.detach())
     patch_eps = arguments.Config["preimage"]["patch_eps"]
-    # pixel_pos = []
-    if dataset == 'mnist':
-        for i in range(xs, xe):
-            for j in range(ys, ye):
-                # print(specLB.shape)
-                specLB[0][i * 28 + j] = max(specLB[0][i * 28 + j] - patch_eps, 0)
-                specUB[0][i * 28 + j] = min(specUB[0][i * 28 + j] + patch_eps, 1)
-                # pixel_pos.append(i * 28 + j)    
+    if len(image.shape) >= 3:
+        channel_first = (len(image.shape) > 3) and (image.shape[1] < image.shape[3])
+        if channel_first:
+            specLB[0, :, xs:xe, ys:ye] = torch.maximum(specLB[0, :, xs:xe, ys:ye] - patch_eps, 0)
+            specUB[0, :, xs:xe, ys:ye] = torch.minimum(specUB[0, :, xs:xe, ys:ye] + patch_eps, 1)
+        else:
+            specLB[0, xs:xe, ys:ye] = torch.maximum(specLB[0, xs:xe, ys:ye] - patch_eps, 0)
+            specUB[0, xs:xe, ys:ye] = torch.minimum(specUB[0, xs:xe, ys:ye] + patch_eps, 1)
     return specLB, specUB
 def get_spec_patch(image, xs, ys, xe, ye, dataset):
     specLB = torch.clone(image.detach())
     specUB = torch.clone(image.detach())
-    # pixel_pos = []
-    if dataset == 'mnist':
-        for i in range(xs, xe):
-            for j in range(ys, ye):
-                # print(specLB.shape)
-                specLB[0][i * 28 + j] = 0
-                specUB[0][i * 28 + j] = 1
-                # pixel_pos.append(i * 28 + j)    
+    if len(image.shape) >= 3:
+        channel_first = (len(image.shape) > 3) and (image.shape[1] < image.shape[3])
+        if channel_first:
+            specUB[0, :, xs:xe, ys:ye] = 1
+            specLB[0, :, xs:xe, ys:ye] = 0
+        else:
+            specUB[0, xs:xe, ys:ye] = 1
+            specLB[0, xs:xe, ys:ye] = 0
     return specLB, specUB
 def calc_l0_spec(img, l0_norm, count, dataset="mnist"):
 
     random.seed(0)
     specLBs, specUBs = [], []
     pixel_pos = []
-    specLB = torch.clone(img.detach())
-    specUB = torch.clone(img.detach())
-    if dataset == 'mnist':
+    if len(img.shape) >= 3:
+        channel_first = (len(img.shape) > 3) and (img.shape[1] < img.shape[3])
+        width, height = img.shape[channel_first + 1 : channel_first + 3]
         for i in range(count):
-            length = 28
-            width = 28
+            specLB = torch.clone(img.detach())
+            specUB = torch.clone(img.detach())
             for _ in range(l0_norm):
-                x = random.randint(0, length-1)
-                y = random.randint(0, width-1)
-                specLB[x * 28 + y] = 0
-                specUB[x * 28 + y] = 1
-                pixel_pos.append(x * 28 + y)
+                x = random.randint(0, width-1)
+                y = random.randint(0, height-1)
+                if channel_first:
+                    specLB[0, :, x, y] = 0
+                    specUB[0, :, x, y] = 1
+                else:
+                    specLB[0, x, y] = 0
+                    specUB[0, x, y] = 1
+                pixel_pos.append(x * height + y)
             specLBs.append(specLB)
             specUBs.append(specUB)
     return specLBs, specUBs, pixel_pos
@@ -937,10 +944,11 @@ def construct_vnnlib(X, labels, runnerups, data_max, data_min, perturb_epsilon, 
         x_upper = data_max.flatten(1)
     elif arguments.Config["specification"]["type"] == 'lp':
         if arguments.Config["specification"]["norm"] == float("inf"):
-            if arguments.Config["preimage"]["patch"]:
-                img = X[example_idx_list].flatten(1)
+            if len(X.shape) >= 3:
+                img = X[example_idx_list]
                 atk_tp = arguments.Config["preimage"]['atk_tp']
                 x_lower, x_upper = calc_img_specs(atk_tp, img, model)
+                x_lower, x_upper = x_lower.flatten(1), x_upper.flatten(1)
             else:
                 if data_max is None:
                     # perturb_eps is already normalized.
@@ -1094,7 +1102,11 @@ def parse_run_mode():
             else:
                 print('No epsilon defined!')
                 perturb_epsilon = None
-            if "MNIST" in arguments.Config["data"]["dataset"]:  
+            if not isinstance(arguments.Config["data"]["dataset"], str):
+                X, labels, data_max, data_min, perturb_epsilon, runnerup, target_label, *_ = list(arguments.Config["data"]["dataset"]) + [None, None]
+                assert X.size(0) == labels.size(0), "batch size of X and labels should be the same!"
+                assert (data_max - data_min).min()>=0, "data_max should always larger or equal to data_min!"
+            elif "MNIST" in arguments.Config["data"]["dataset"] or arguments.Config["data"]["dataset"].startswith("Customized("):  
                 X, labels, runnerup, data_max, data_min, perturb_epsilon, target_label = load_verification_dataset(perturb_epsilon)
             else:
                 X, labels, runnerup, data_max, data_min, perturb_epsilon, target_label = load_input_info(arguments.Config["data"]["dataset"], arguments.Config["preimage"]["label"], quant=arguments.Config["preimage"]["quant"])
@@ -1152,6 +1164,5 @@ def parse_run_mode():
     else:
         raise NotImplementedError
 
-    print(f'Internal results will be saved to {save_path}.')
     # FIXME_NOW: model_ori should not be handled in this function! Do it in the utility function that loads models for all cases.
     return run_mode, save_path, file_root, example_idx_list, model_ori, vnnlib_all, shape

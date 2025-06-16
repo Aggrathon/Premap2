@@ -1109,7 +1109,7 @@ class BoundedModule(nn.Module):
             intermediate_constr=None, alpha_idx=None,
             aux_reference_bounds=None, need_A_only=False,
             cutter=None, decision_thresh=None,
-            update_mask=None, opt_poly_vol=False, opt_relu_poly=False, sample_left_idx=None, sample_right_idx=None):
+            update_mask=None, opt_poly_vol=False, opt_relu_poly=False, samples=None):
         r"""Main function for computing bounds.
 
         Args:
@@ -1251,7 +1251,7 @@ class BoundedModule(nn.Module):
                     aux_reference_bounds=aux_reference_bounds,
                     needed_A_dict=needed_A_dict,
                     final_node_name=final_node_name,
-                    cutter=cutter, decision_thresh=decision_thresh,opt_poly_vol=opt_poly_vol,opt_relu_poly=opt_relu_poly, sample_left_idx=sample_left_idx, sample_right_idx=sample_right_idx)
+                    cutter=cutter, decision_thresh=decision_thresh,opt_poly_vol=opt_poly_vol,opt_relu_poly=opt_relu_poly, samples=samples)
             if bound_upper:
                 ret2 = self.get_optimized_bounds(
                     x=x, C=C, method=method,
@@ -1261,7 +1261,7 @@ class BoundedModule(nn.Module):
                     aux_reference_bounds=aux_reference_bounds,
                     needed_A_dict=needed_A_dict,
                     final_node_name=final_node_name,
-                    cutter=cutter, decision_thresh=decision_thresh, opt_poly_vol=opt_poly_vol,opt_relu_poly=opt_relu_poly, sample_left_idx=sample_left_idx, sample_right_idx=sample_right_idx)
+                    cutter=cutter, decision_thresh=decision_thresh, opt_poly_vol=opt_poly_vol,opt_relu_poly=opt_relu_poly, samples=samples)
             if bound_lower and bound_upper:
                 if return_A:
                     # Needs to merge the A dictionary.
@@ -1345,8 +1345,11 @@ class BoundedModule(nn.Module):
                     f'C is not missing while node {final} has no default shape')
             dim_output = int(prod(final.output_shape[1:]))
             # TODO: use an eyeC object here.
-            C = torch.eye(dim_output, device=self.device).expand(
-                batch_size, dim_output, dim_output)
+            C = (
+                torch.eye(dim_output, device=self.device)
+                    .view(-1, *final.output_shape[1:])
+                    .expand(batch_size, dim_output, *final.output_shape[1:])
+            )
 
         # Reuse previously saved alpha values,
         # even if they are not optimized now
@@ -1411,7 +1414,7 @@ class BoundedModule(nn.Module):
                 C=C, node=final,
                 bound_lower=bound_lower, bound_upper=bound_upper,
                 average_A=average_A, need_A_only=need_A_only,
-                unstable_idx=alpha_idx, update_mask=update_mask, opt_input_poly=opt_poly_vol, opt_relu_poly=opt_relu_poly, sample_left_idx=sample_left_idx, sample_right_idx=sample_right_idx)
+                unstable_idx=alpha_idx, update_mask=update_mask, opt_input_poly=opt_poly_vol, opt_relu_poly=opt_relu_poly, samples=samples)
             # FIXME when C is specified, lower and upper should not be saved to
             # final.lower and final.upper, because they are not the bounds for
             # the node.
