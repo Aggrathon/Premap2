@@ -1,0 +1,69 @@
+[project]
+name = "premap2"
+version = "0.1.0"
+description = "Preimage approximations for neural networks"
+readme = "README.md"
+authors = [
+    { name = "Anton Björklund", email = "anton.bjorklund@cs.ox.ac.uk" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "numpy<2.0",
+    "onnx>=1.16.0",
+    "pyyaml>=6.0.0",
+    "torch<2.0",
+    "torchvision>=0.12",
+    "tqdm>=4.67.0",
+    "onnxruntime>=1.20.1",
+    "sortedcontainers>=2.4.0",
+    "psutil>=6.1.0",
+    "onnx2pytorch",
+    "setuptools>=75.6.0",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv.sources]
+onnx2pytorch = { git = "https://github.com/KaidiXu/onnx2pytorch" }
+
+[dependency-groups]
+dev = [
+    "ipython>=8.30.0",
+    "matplotlib>=3.10.0",
+    "pytest>=8.3.4",
+    "ruff>=0.8.3",
+    "polars>=1.27.1",
+    "pyarrow>=19.0.0",
+    "seaborn>=0.13.0",
+    "scipy>=1.15.0",
+    "scikit-learn>=1.6.0",
+    "jupyter>=1.1.0",
+    "ipywidgets>=8.1.0",
+    "pytest-cov>=6.1.1",
+]
+
+[project.scripts]
+premap = "premap2.wrapper:cli"
+
+[tool.pytest.ini_options]
+addopts = ["--cov", "--cov-report="]
+testpaths = ["tests"]
+
+[tool.ruff]
+extend-exclude = ["src/premap", "src/auto_LiRPA", "PreimageApproxForNNs"]
+
+[tool.coverage.run]
+branch = true
+omit = ["PreimageApproxForNNs/*"]
+
+[tool.coverage.paths]
+source = ["src/premap2/"]
+
+[tool.coverage.report]
+exclude_also = [
+    "print",
+    "plt.show",
+    "ImportError",
+]

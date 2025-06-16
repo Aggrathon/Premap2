@@ -1,0 +1,37 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.pytest_cache
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv
+.venv*
+
+# Submodule symlinks
+PreimageApproxForNNs_old/result_dir
+PreimageApproxForNNs/result_dir
+src/result_dir
+src/auto_LiRPA/
+src/premap/
+src/model_dir/
+
+# Binary files
+*.pt
+*.onnx
+*.npy
+*.npz
+*.pkl
+*.prof
+output/
+
+# User files
+.vscode
+*.log
+.DS_Store
+*.zip
