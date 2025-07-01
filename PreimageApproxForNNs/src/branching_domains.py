@@ -217,8 +217,9 @@ class SortedReLUDomainList(AbstractReLUDomainList):
             print(f"Skipping subdomain without preimage ({relu_dm.volume:.5f}).")
             return
         elif relu_dm.volume < 1e-6:
-            print(f"Discarding subdomain with tiny volume ({relu_dm.volume:.5f}).")
-            return
+            print(f"Stopping subdomain with tiny volume ({relu_dm.volume:.5f}).")
+            relu_dm.priority = -np.inf
+            relu_dm.samples = relu_dm.beta = relu_dm.slope = relu_dm.intermediate_betas = relu_dm.lower_all =  relu_dm.upper_all = None
         elif torch.all(relu_dm.lower_bound > relu_dm.threshold).detach().cpu().item():
             print(f"Subdomain fully verified ({relu_dm.preimg_vol * relu_dm.preimg_cov:.5f} / {relu_dm.preimg_vol:.5f} / {relu_dm.volume:.5f}).")
             relu_dm.samples = relu_dm.beta = relu_dm.slope = relu_dm.intermediate_betas = relu_dm.lower_all =  relu_dm.upper_all = None

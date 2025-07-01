@@ -84,10 +84,9 @@ def batch_verification(num_unstable, d, net, batch, pre_relu_indices, growth_rat
 
     sample_num = arguments.Config["preimage"]["sample_num"]
     sample_instability = arguments.Config["preimage"]["instability"]
-    patch = "patch" in arguments.Config["preimage"]["atk_tp"]
     heuristics = arguments.Config["preimage"]["heuristics"]
     tighten = arguments.Config["preimage"]["tighten_bounds"]
-    samples = [calc_samples(domain.samples, net.model_ori, sample_num, domain.history, patch, debug=debug) for domain in selected_domains]
+    samples = [calc_samples(domain.samples, net.model_ori, sample_num, domain.history, debug=debug) for domain in selected_domains]
     if sample_instability:
         eps = torch.finfo(samples[0].X.dtype).eps * 4
         for i, (lb, ub) in enumerate(zip(orig_lbs[:-1], orig_ubs)):
@@ -134,7 +133,7 @@ def batch_verification(num_unstable, d, net, batch, pre_relu_indices, growth_rat
 
 
     # Split
-    ret = split_node_batch(net, d, orig_lbs, orig_ubs, slopes, betas, intermediate_betas, selected_domains, cs, rhs, history, samples, branching_decision, tighten=tighten, debug=debug)
+    ret = split_node_batch(net, d, bound_lower, orig_lbs, orig_ubs, slopes, betas, intermediate_betas, selected_domains, cs, rhs, history, samples, branching_decision, tighten=tighten, debug=debug)
     orig_lbs, orig_ubs, slopes, betas, intermediate_betas, selected_domains, cs, rhs, history, left_right_his, samples, branching_decision = ret
 
     if len(branching_decision) == 0:
@@ -310,7 +309,7 @@ def initial_check_preimage_approx(A_dict, thre, c, samples=None):
         else:
             return False, cov_quota, target_vol, preimage_dict
     else:
-        target_vol, cov_quota, preimage_dict = calc_initial_coverage(A_dict, preimage_dict, c, samples, False, debug)
+        target_vol, cov_quota, preimage_dict = calc_initial_coverage(A_dict, c, samples, False, debug)
         if cov_quota <= thre:  # check whether the preimage approx satisfies the criteria
             print("Reached by optmization on the initial domain!")
             return True, cov_quota, target_vol, preimage_dict
@@ -371,8 +370,7 @@ def relu_bab_parallel(net, domain, x, use_neuron_set_strategy=False, refined_low
     sample_num = arguments.Config["preimage"]["sample_num"]
     sample_instability = arguments.Config["preimage"]["instability"]
     debug = arguments.Config["debug"]["asserts"]
-    patch = "patch" in arguments.Config["preimage"]["atk_tp"]
-    samples = calc_samples((x.ptb.x_L, x.ptb.x_U), net.model_ori, sample_num, patch=patch, debug=debug)
+    samples = calc_samples((x.ptb.x_L, x.ptb.x_U), net.model_ori, sample_num, debug=debug)
     tot_ambi_nodes_sample = 0
     for relu, uns in zip(net.net.relus, samples.unstable()):
         print(f'layer {relu.name} size {tuple(uns.shape)} unstable {uns.count_nonzero()}')
@@ -415,6 +413,11 @@ def relu_bab_parallel(net, domain, x, use_neuron_set_strategy=False, refined_low
     # NOTE check the first coarsest preimage without any splitting or optimization
     initial_covered, cov_quota, target_vol, preimage_dict = initial_check_preimage_approx(A, cov_thre, net.c, samples)
     print('Preimage volume:', target_vol)
+    if debug:
+        if bound_lower:
+            assert cov_quota <= 1.0
+        elif bound_upper:
+            assert cov_quota >= 1.0
     # NOTE second variable is intended for extra constraints
     times = [time.time() - start]
     coverages = [cov_quota]
@@ -626,9 +629,8 @@ def relu_bab_parallel(net, domain, x, use_neuron_set_strategy=False, refined_low
             num_domains.append(len(domains))
             print(f'--- Iteration {num_iter+1:2d}, Coverage quota {cov_quota:8.6f}, Time {time.time() - start:.1f}s ---')
             iter_cov_quota.append(cov_quota)
-            # if num_iter == 163:
-            #     print("start to check")
-            #     print("check details")
+            if debug:
+                assert cov_quota <= 1.0
             if arguments.Config["preimage"]["save_process"]:
                 preimage_dict_all = get_preimage_info(domains)
                 # history_list = []
@@ -689,9 +691,8 @@ def relu_bab_parallel(net, domain, x, use_neuron_set_strategy=False, refined_low
             num_domains.append(len(domains))
             print(f'--- Iteration {num_iter+1:2d}, Coverage quota {cov_quota:8.6f}, Time {time.time() - start:.1f}s ---')
             iter_cov_quota.append(cov_quota)
-            # if num_iter == 163:
-            #     print("start to check")
-            #     print("check details")
+            if debug:
+                assert cov_quota >= 1.0
             if arguments.Config["preimage"]["save_process"]:
                 preimage_dict_all = get_preimage_info(domains)
                 # history_list = []

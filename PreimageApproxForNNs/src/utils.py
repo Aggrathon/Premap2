@@ -807,25 +807,20 @@ def default_onnx_and_vnnlib_loader(file_root, onnx_path, vnnlib_path):
 
 def calc_img_specs(attack_tp, img, model=None):
     if 'patch' in attack_tp:
-        data_lb, data_ub = calc_patch_spec(attack_tp, img, patch_len=arguments.Config["preimage"]["patch_len"], patch_wid=arguments.Config["preimage"]["patch_width"])
+        x = arguments.Config["preimage"]["patch_x"]
+        y = arguments.Config["preimage"]["patch_y"]
+        w = arguments.Config["preimage"]["patch_w"]
+        h = arguments.Config["preimage"]["patch_h"]
+        if attack_tp == 'patch':
+            data_lb, data_ub = get_spec_patch(img, x, y, x + w, y + h, None)
+        elif attack_tp == 'patch_eps':
+            data_lb, data_ub = get_spec_patch_eps(img, x, y, x + w, y + h, None)
     elif attack_tp == 'l0_rand':
         data_lb, data_ub = calc_l0_spec_rand(img, l0_norm=arguments.Config["preimage"]["l0_norm"])
     elif attack_tp == "l0_sensitive":
         data_lb, data_ub = calc_l0_spec_sensitive(model, img)
     return data_lb, data_ub
 
-def calc_patch_spec(atk_tp, img, patch_len, patch_wid, dataset="mnist"):
-    if atk_tp == 'patch':
-        x = arguments.Config["preimage"]["patch_h"]
-        y = arguments.Config["preimage"]["patch_v"]
-        specLB, specUB = get_spec_patch(
-            img, x, y, x + patch_wid, y + patch_len, dataset)   
-    elif atk_tp == 'patch_eps':
-        x = arguments.Config["preimage"]["patch_h"]
-        y = arguments.Config["preimage"]["patch_v"] 
-        specLB, specUB = get_spec_patch_eps(
-            img, x, y, x + patch_wid, y + patch_len, dataset)          
-    return specLB, specUB
 def calc_l0_spec_rand(img, l0_norm, dataset="mnist"):
     random.seed(arguments.Config["general"]["seed"])
     specLB = torch.clone(img.detach())
@@ -876,7 +871,7 @@ def calc_l0_spec_sensitive(model, img):
 def get_spec_patch_eps(image, xs, ys, xe, ye, dataset):
     specLB = torch.clone(image.detach())
     specUB = torch.clone(image.detach())
-    patch_eps = arguments.Config["preimage"]["patch_eps"]
+    patch_eps = arguments.Config["specification"]["epsilon"]
     if len(image.shape) >= 3:
         channel_first = (len(image.shape) > 3) and (image.shape[1] < image.shape[3])
         if channel_first:
@@ -1103,17 +1098,19 @@ def parse_run_mode():
                 print('No epsilon defined!')
                 perturb_epsilon = None
             if not isinstance(arguments.Config["data"]["dataset"], str):
-                X, labels, data_max, data_min, perturb_epsilon, runnerup, target_label, *_ = list(arguments.Config["data"]["dataset"]) + [None, None]
+                X, labels, data_max, data_min = arguments.Config["data"]["dataset"]
+                target_label = arguments.Config["preimage"].get("label", None)
+                runnerup = arguments.Config["preimage"].get("runner_up", None)
+                X, labels = torch.as_tensor(X), torch.atleast_1d(torch.as_tensor(labels))
+                data_max, data_min = torch.as_tensor(data_max), torch.as_tensor(data_min)
                 assert X.size(0) == labels.size(0), "batch size of X and labels should be the same!"
                 assert (data_max - data_min).min()>=0, "data_max should always larger or equal to data_min!"
             elif "MNIST" in arguments.Config["data"]["dataset"] or arguments.Config["data"]["dataset"].startswith("Customized("):  
                 X, labels, runnerup, data_max, data_min, perturb_epsilon, target_label = load_verification_dataset(perturb_epsilon)
             else:
                 X, labels, runnerup, data_max, data_min, perturb_epsilon, target_label = load_input_info(arguments.Config["data"]["dataset"], arguments.Config["preimage"]["label"], quant=arguments.Config["preimage"]["quant"])
-                if not arguments.Config["bab"]["branching"]["input_split"]["enable"]:
-                    if runnerup is None:
-                        runnerup = arguments.Config["preimage"]["runner_up"]
-                        runnerup = torch.tensor([runnerup]).long()
+                if runnerup is None:
+                    runnerup = arguments.Config["preimage"]["runner_up"]
             if arguments.Config["data"]["data_idx_file"] is not None:
                 # Go over a list of data indices.
                 with open(arguments.Config["data"]["data_idx_file"]) as f:
@@ -1123,6 +1120,8 @@ def parse_run_mode():
             else:
                 # By default, we go over all data.
                 example_idx_list = list(range(X.shape[0]))
+            if runnerup is not None:
+                runnerup = torch.atleast_1d(torch.as_tensor(runnerup)).long()
             example_idx_list = example_idx_list[arguments.Config["data"]["start"]:arguments.Config["data"]["end"]]
             atk_tp = arguments.Config["preimage"]['atk_tp']
             if atk_tp == "l0_sensitive":

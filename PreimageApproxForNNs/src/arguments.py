@@ -75,39 +75,37 @@ class ConfigHandler:
         # Add preimage arguments
         h = ["preimage"]
         self.add_argument("--sample_dir", type=str, default=None, help='Directory to save and load samples for loss estimation and polytope coverage (deprecated).',
-                          hierarchy=h + ["sample_dir"]) 
-        self.add_argument("--result_dir", type=str, default=None, help='Result directory to specify for saving your results.',
-                          hierarchy=h + ["result_dir"])       
+                          hierarchy=h + ["sample_dir"])
+        self.add_argument("--result_dir", type=str, default="", help='Result directory to specify for saving your results.',
+                          hierarchy=h + ["result_dir"])
         self.add_argument("--over_approx", type=str2bool, default=False, help='To generate preimage over-approximation or not.',
                     hierarchy=h + ["over_approx"])
         self.add_argument("--under_approx", type=str2bool, default=True, help='To generate preimage under-approximation or not.',
                     hierarchy=h + ["under_approx"])
         self.add_argument("--threshold", type=float, default=0.9, help='Target preimage coverage threshold for termination. No less than 1 for over-approximation and no greater than 1 for under-approximation.',
                     hierarchy=h + ["threshold"])
-        self.add_argument("--label", type=int, default=1, help='Indicate which label to build input preimage for.',
+        self.add_argument("--label", type=int, default=None, help='Indicate which label to build input preimage for.',
                           hierarchy=h + ["label"])
-        self.add_argument("--runner_up", type=int, default=0, help='Indicate which label to build safety property for, for dubinsrejoin indicate the label for throttle actions.',
+        self.add_argument("--runner_up", type=int, default=None, help='Indicate which label to build safety property for, for dubinsrejoin indicate the label for throttle actions.',
                           hierarchy=h + ["runner_up"])
         self.add_argument("--vcas_idx", type=int, default=0, help='Indicate VCAS model index to build input preimage for.',
-                          hierarchy=h + ["vcas_idx"])    
+                          hierarchy=h + ["vcas_idx"])
         self.add_argument("--upper_time_loss", type=float, default=0.5, help='Indicate the upper bound of time loss for the VCAS system.',
                           hierarchy=h + ["upper_time_loss"])
-        self.add_argument("--patch_h", type=int, default=11, help='Indicate the patch horizontal index to build input preimage for.',
-                          hierarchy=h + ["patch_h"]) #11
-        self.add_argument("--patch_v", type=int, default=11, help='Indicate the patch vertical index to build input preimage for.',
-                          hierarchy=h + ["patch_v"])
-        self.add_argument("--patch_len", type=int, default=11, help='Indicate the patch length to build input preimage for.',
-                          hierarchy=h + ["patch_len"])
-        self.add_argument("--patch_width", type=int, default=11, help='Indicate the patch width to build input preimage for.',
-                          hierarchy=h + ["patch_width"])
-        self.add_argument("--patch_eps", type=float, default=0.46, help='Patch noise epsilon for preimage generation of patch attack.',
-                          hierarchy=h + ["patch_eps"])
+        self.add_argument("--patch_x", type=int, default=None, help='Indicate the patch horizontal index to build input preimage for.',
+                          hierarchy=h + ["patch_x"])
+        self.add_argument("--patch_y", type=int, default=None, help='Indicate the patch vertical index to build input preimage for.',
+                          hierarchy=h + ["patch_y"])
+        self.add_argument("--patch_h", type=int, default=None, help='Indicate the patch length to build input preimage for.',
+                          hierarchy=h + ["patch_h"])
+        self.add_argument("--patch_w", type=int, default=None, help='Indicate the patch width to build input preimage for.',
+                          hierarchy=h + ["patch_w"])
         self.add_argument("--l0_norm", type=int, default=24, help='Indicate the l0 norm to build input preimage for.',
-                          hierarchy=h + ["l0_norm"])      
+                          hierarchy=h + ["l0_norm"])
         self.add_argument("--sample_num", type=int, default=2000, help='Sample number to estimate preimage coverage.',
-                          hierarchy=h + ["sample_num"])        
+                          hierarchy=h + ["sample_num"])
         self.add_argument("--branch_budget", type=int, default=10_000, help='Branching budget to see how many preimage polytopes we set as upper limit.',
-                          hierarchy=h + ["branch_budget"])        
+                          hierarchy=h + ["branch_budget"])
         self.add_argument("--multi_spec", type=str2bool, default=False, help='The multi specification support for preimage analysis.',
                     hierarchy=h + ["multi_spec"])
         self.add_argument("--sample_instability", type=str2bool, default=False, help='Use sampling identified instability for preimage analysis.',
@@ -119,15 +117,15 @@ class ConfigHandler:
         self.add_argument("--quant_analysis", type=str2bool, default=False, help='Whether to do quantitative analysis for preimage.',
                     hierarchy=h + ["quant"])
         self.add_argument("--init_beta", type=str2bool, default=False, help='Whether to use smooth beta.',
-                    hierarchy=h + ["init_beta"])   
+                    hierarchy=h + ["init_beta"])
         self.add_argument("--worst_beta", type=str2bool, default=False, help='Whether to use worst-case based beta.',
-                    hierarchy=h + ["worst_beta"])  
+                    hierarchy=h + ["worst_beta"])
         self.add_argument("--smooth_beta", type=str2bool, default=False, help='Whether to use smooth beta.',
-                    hierarchy=h + ["smooth_beta"]) 
+                    hierarchy=h + ["smooth_beta"])
         self.add_argument("--compare_split", type=str2bool, default=False, help='Whether to compare the usefulness of smooth val for input feature selection.',
-                    hierarchy=h + ["compare_split"])  
+                    hierarchy=h + ["compare_split"])
         self.add_argument("--smooth_val", type=str2bool, default=True, help='Whether to use smooth val for input feature selection.',
-                    hierarchy=h + ["smooth_val"])      
+                    hierarchy=h + ["smooth_val"])
         self.add_argument("--atk_tp", type=str, default="patch", choices=["patch_eps", "patch", "l0_rand", "l0_sensitive", "l_inf"], help='The pixel attack to specify the input specification.',
                           hierarchy=h + ["atk_tp"])
         self.add_argument('--heuristics', nargs='+', metavar="KEY=VALUE", type=keyvaluef, help='Specify coefficients for the node selection heuristic.',
@@ -179,7 +177,7 @@ class ConfigHandler:
         self.add_argument("--model", type=str, default=None, help='Model name. Will be evaluated as a python statement.',
                           hierarchy=h + ["name"]) # e.g., "mnist_6_100"
         self.add_argument("--load_model", type=str, default=None,
-                          help='Load pretrained model from this specified path.', hierarchy=h + ["path"]) 
+                          help='Load pretrained model from this specified path.', hierarchy=h + ["path"])
         # e.g., "./models/eran/mnist_6_100_nat.pth"
         self.add_argument("--onnx_path", type=str, default=None, help='Path to .onnx model file.',
                           hierarchy=h + ["onnx_path"])
@@ -208,7 +206,7 @@ class ConfigHandler:
                           help='Onnx graph optimization config.', hierarchy=h + ["onnx_optimization_flags"])
 
         h = ["data"]
-        self.add_argument("--dataset", type=str, default="MNIST_ERAN_UN",
+        self.add_argument("--dataset", type=str, default=None,
                           help="Dataset name. Dataset must be defined in utils.py. For customized data, checkout custom_model_data.py.",
                           hierarchy=h + ["dataset"]) # e.g., "MNIST_ERAN_UN"
         self.add_argument('--num_outputs', type=int, default=10, help="Number of classes for classification problem.",
@@ -308,7 +306,7 @@ class ConfigHandler:
         h = ["solver", "beta-crown"]
         self.add_argument("--lr_alpha", type=float, default=0.2,
                           help='Learning rate for optimizing alpha during branch and bound.',
-                          hierarchy=h + ["lr_alpha"]) 
+                          hierarchy=h + ["lr_alpha"])
         self.add_argument("--lr_beta", type=float, default=0.05,
                           help='Learning rate for optimizing beta during branch and bound.', hierarchy=h + ["lr_beta"]) #0.05
         self.add_argument("--beta_lr_decay", type=float, default=0.98,
@@ -453,7 +451,7 @@ class ConfigHandler:
                           help='If unsorted domains are used, sort the domains every sort_domain_interval iterations.',
                           hierarchy=h + ["sort_domain_interval"])
         # Cut options are not needed for preimage analysis.
-        # FIXME: cut should not be under bab. We don't have to use bab with cuts. It should be under "solver" category.   
+        # FIXME: cut should not be under bab. We don't have to use bab with cuts. It should be under "solver" category.
         h = ["bab", "cut"]
         self.add_argument('--enable_cut', action='store_true', dest='enable_cut', help='Enable cutting planes using GCP-CROWN.',
                           hierarchy=h + ["enabled"])
@@ -761,4 +759,3 @@ class ReadOnlyDict(dict):
 Config = ConfigHandler()
 # Global variables
 Globals = ReadOnlyDict({"starting_timestamp": int(time.time()), "example_idx": -1, "lp_perturbation_eps": None})
-
