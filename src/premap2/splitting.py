@@ -239,6 +239,7 @@ def calc_priority(
 def split_node_batch(
     net: "LiRPAConvNet",
     domains: "SortedReLUDomainList",
+    under: bool,
     orig_lbs: list[torch.Tensor],
     orig_ubs: list[torch.Tensor],
     slopes: dict[str, dict[str, torch.Tensor]],
@@ -260,6 +261,7 @@ def split_node_batch(
     Args:
         net: LiRPA wrapped network.
         domains: List of domains.
+        under: Under or over approximation.
         orig_lbs: Lower bounds.
         orig_ubs: Upper bounds.
         slopes: Alpha-CROWN slopes.
@@ -353,48 +355,59 @@ def split_node_batch(
         assert all((ub >= lb).all().cpu().item() for lb, ub in zip(orig_lbs, orig_ubs))
 
     # Check and shortcut one-sided splits
+    def readd_domain(b: int, above: bool = True, final: bool = False):
+        s1, s2 = samples[b]
+        domain = selected_domains[b]
+        layer, index = branching_decision[b]
+        if final:
+            domain = copy.copy(domain)
+            domain.priority = -np.nan
+        domain.valid = True
+        domain.history = copy.copy(domain.history)
+        hist_ind, hist_sign = domain.history[layer]
+        if above:
+            domain.samples = s1
+            domain.history[layer] = (hist_ind + [index], hist_sign + [+1.0])
+            domain.lower_all = [lb[None, b] for lb in orig_lbs]
+            domain.upper_all = [ub[None, b] for ub in orig_ubs]
+            domain.volume = domain.volume * (len(s1) / (len(s1) + len(s2)))
+            domains.add_domain(domain)
+        else:
+            domain.samples = s2
+            domain.history[layer] = (hist_ind + [index], hist_sign + [-1.0])
+            domain.lower_all = [lb[None, b + len(samples)] for lb in orig_lbs]
+            domain.upper_all = [ub[None, b + len(samples)] for ub in orig_ubs]
+            domain.volume = domain.volume * (len(s2) / (len(s1) + len(s2)))
+            domains.add_domain(domain)
+
     b = 0
     split_str = ""
     pruned = False
     while b < len(samples):
         s1, s2 = samples[b]
-        len_s1, len_s2 = len(s1), len(s2)
-        if len_s1 > 0:
-            len_s1 = (torch.einsum("o...,n...->no", cs[b], s1.y) >= 0).all(-1)
-            len_s1 = len_s1.count_nonzero().cpu().item()
-        if len_s2 > 0:
-            len_s2 = (torch.einsum("o...,n...->no", cs[b], s2.y) >= 0).all(-1)
-            len_s2 = len_s2.count_nonzero().cpu().item()
-        split_str += f"({len_s1} | {len_s2}) "
-        if len_s1 == 0 or len_s2 == 0:
-            domain = selected_domains[b]
-            layer, index = branching_decision[b]
-            # NOTE: An empty mask means either an invalid domain or extremely tiny volume.
-            # In case of invalid domain, pruning is the correct course of action.
-            # In case of tiny volume, ideally we should try more samples.
-            # However, that might be difficult and might not change the result in any meaningful way.
-            domain.valid = True
-            domain.history = copy.copy(domain.history)
-            hist_ind, hist_sign = domain.history[layer]
-            if len_s1 == 0:
-                pruned = True
-            else:
-                domain.samples = s1
-                domain.history[layer] = (hist_ind + [index], hist_sign + [+1.0])
-                domain.lower_all = [lb[None, b] for lb in orig_lbs]
-                domain.upper_all = [ub[None, b] for ub in orig_ubs]
-                domain.volume = domain.volume * (len(s1) / (len(s1) + len(s2)))
-                domains.add_domain(domain)
-            if len_s2 == 0:
-                pruned = True
-            else:
-                domain.samples = s2
-                domain.history[layer] = (hist_ind + [index], hist_sign + [-1.0])
-                domain.lower_all = [lb[None, b + len(samples)] for lb in orig_lbs]
-                domain.upper_all = [ub[None, b + len(samples)] for ub in orig_ubs]
-                domain.volume = domain.volume * (len(s2) / (len(s1) + len(s2)))
-                domains.add_domain(domain)
+        len1 = len(s1)
+        len2 = len(s2)
+        split_str += f"({len1} | {len2}) "
+        remove1 = len1 == 0
+        remove2 = len2 == 0
+        # NOTE: An empty mask means either an invalid domain or extremely tiny volume.
+        # In case of invalid domain, pruning is the correct course of action.
+        # In case of tiny volume, ideally we should try more samples.
+        # However, that might be difficult and might not change the result in any meaningful way.
+        if under and not remove1 and not remove2:
+            preimg1 = (torch.einsum("o...,n...->no", cs[b], s1.y) >= 0).all(-1)
+            preimg1 = preimg1.count_nonzero().cpu().item()
+            preimg2 = (torch.einsum("o...,n...->no", cs[b], s2.y) >= 0).all(-1)
+            preimg2 = preimg2.count_nonzero().cpu().item()
+            remove1 = preimg1 == 0
+            remove2 = preimg2 == 0
+        if remove1 or remove2:
+            if not remove1:
+                readd_domain(b, True, False)
+            if not remove2:
+                readd_domain(b, False, False)
             remove_domain(b, False)
+            pruned = True
         else:
             b += 1
     if len(split_str) > 101:
@@ -402,7 +415,7 @@ def split_node_batch(
     elif len(split_str) > 0:
         print("Splits preimage:", split_str[:100])
     if pruned:
-        print("Pruned subdomains without preimage samples.")
+        print("Shortcut subdomains without preimage samples.")
     samples = [s[i] for i in range(2) for s in samples]
     if debug:
         assert all(len(s) > 0 for s in samples)

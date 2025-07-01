@@ -288,7 +288,6 @@ def calc_samples(
     model: torch.nn.Module,
     num: int = 10_000,
     history: list[tuple[list[int], list[float]]] | None = None,
-    patch: bool = False,
     debug: bool = IS_TEST_OR_DEBUG,
 ) -> Samples:
     """Generate uniform samples from the domain and compute their activations.
@@ -298,14 +297,13 @@ def calc_samples(
         model: Model to compute activations.
         num: Number of samples.
         history: Split history.
-        patch: Is the input specification a patch.
         debug: Enable additional asserts.
 
     Returns:
         samples: Generated samples.
     """
     with torch.no_grad():
-        return get_samples(x, model, num, history, patch, debug)
+        return get_samples(x, model, num, history, debug=debug)
 
 
 def get_samples(
@@ -313,7 +311,6 @@ def get_samples(
     model: torch.nn.Module,
     samples: int = 10_000,
     history: list[tuple[list[int], list[float]]] | None = None,
-    patch: bool = False,
     debug: bool = IS_TEST_OR_DEBUG,
 ) -> Samples:
     """Generate uniform samples from the domain and compute their activations.
@@ -323,14 +320,12 @@ def get_samples(
         model: Model to compute activations.
         samples: Number of samples.
         history: Split history.
-        patch: Is the input specification a patch.
         debug: Enable additional asserts.
 
     Returns:
         Generated samples.
     """
     model = WithActivations(model)
-    mask = None
     if isinstance(x, Samples):
         x.X = _expand_patch(x.X, x.lower, x.mask)
         if x.activations is None:
@@ -350,11 +345,12 @@ def get_samples(
             lower = lower[:1]
             upper = upper[:1]
         A = b = lAs = uAs = X = y = act = None
-        if patch:
-            mask = (lower < upper)[0]
+        mask = (lower < upper)[0]
+        if mask.count_nonzero() >= mask.numel() - 2:
+            mask = None
     if history is None or sum((len(h[0]) for h in history), 0) == 0:
         # Without a domain we can just sample the bounding box
-        if patch:
+        if mask is not None:
             X = get_box_samples(lower[:, mask], upper[:, mask], samples * 5)
             X = _expand_patch(X, lower, mask)
         else:
@@ -393,7 +389,7 @@ def get_samples(
             model,
             samples,
             history,
-            patch_mask=mask,
+            mask=mask,
             debug=debug,
         )
         if debug:
@@ -514,7 +510,7 @@ def rejection_sample(
     model: WithActivations | torch.nn.Module,
     samples: int,
     history: list[tuple[list[int], list[int]]],
-    patch_mask: torch.Tensor | None = None,
+    mask: torch.Tensor | None = None,
     max_iter: int = 20,
     debug: bool = IS_TEST_OR_DEBUG,
 ) -> tuple[torch.Tensor, torch.Tensor, list[torch.Tensor]]:
@@ -558,11 +554,11 @@ def rejection_sample(
     model = model if isinstance(model, WithActivations) else WithActivations(model)
     hit_and_run = False
     attempts = 0
-    if patch_mask is not None:
-        old_X = old_X[:, patch_mask]
+    if mask is not None:
+        old_X = old_X[:, mask]
         patch_x = lower
-        lower = lower[:, patch_mask]
-        upper = upper[:, patch_mask]
+        lower = lower[:, mask]
+        upper = upper[:, mask]
     while attempts < max_iter:
         n = max(50, min(samples * 3 // 2, (samples - count) * 2))
         if hit_and_run:
@@ -576,11 +572,11 @@ def rejection_sample(
         if X is None or X.shape[0] == 0:
             continue
         old_X = X if X.shape[0] > 100 else torch.cat((old_X, X))
-        if patch_mask is not None:
-            X = _expand_patch(X, patch_x, patch_mask)
+        if mask is not None:
+            X = _expand_patch(X, patch_x, mask)
         y, act = model(X)
-        mask = split_contains(history, act)
-        X = X[mask]
+        inside = split_contains(history, act)
+        X = X[inside]
         if X.shape[0] == 0:
             continue
         count += X.shape[0]
@@ -589,8 +585,8 @@ def rejection_sample(
             ys.append(y)
             acts.append(act)
         else:
-            ys.append(y[mask])
-            acts.append([a[mask].contiguous() for a in act])
+            ys.append(y[inside])
+            acts.append([a[inside].contiguous() for a in act])
         if count >= samples * (2 - hit_and_run):
             break
     if count == 0:

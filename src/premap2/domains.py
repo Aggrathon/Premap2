@@ -218,7 +218,7 @@ def save_premap(
         ]
     if not isinstance(config["model"]["name"], (str, type(None))):
         cls = type(config["model"]["name"])
-        config["model"]["name"] = ".".join((cls.__module__, cls.__qualname__))
+        config["model"]["name"] = cls.__qualname__
     preimage_dict = {
         "config": config,
         "time": total_time,

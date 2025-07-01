@@ -47,7 +47,8 @@ def test_sample():
     ]:
         s = calc_samples((x, x + 1), model, 100)
         assert len(s) >= 100
-        s = calc_samples((x, x + 1), model, 100, patch=True)
+        xu = x + (torch.rand(x.shape) > 0.3).type(x.dtype)
+        s = calc_samples((x, xu), model, 100)
         uns = s.unstable()
         split = [
             u.flatten().nonzero()[0].cpu().item()
