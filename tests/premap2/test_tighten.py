@@ -5,9 +5,10 @@ import torch
 
 from auto_LiRPA import BoundedModule, BoundedTensor, PerturbationLpNorm
 from premap2.tighten_bounds import (
+    NewBounds,
+    tighten_backwards,
     tighten_bounds,
     tighten_bounds_back,
-    tighten_backwards,
 )
 from premap2.utils import WithActivations
 
@@ -70,7 +71,7 @@ def test_tighten():
             assert (ub + 1e-6 > a).all().item()
             assert (lb < ub).all().item()
         old_bounds = copy.deepcopy(bounds)
-        bounds = tighten_bounds(lirpa, x, bounds)
+        bounds = tighten_bounds(lirpa, x, bounds, forward=True)
         for a, (lb, ub), (olb, oub) in zip(act, bounds.values(), old_bounds.values()):
             assert (lb < ub).all().item()
             assert (lb - 1e-6 < a).all().item()
@@ -84,7 +85,8 @@ def test_tighten():
         mask = (act[-1] > bounds[key][0]).all(1)
         if not mask.any().item() or mask.all().item():
             continue
-        bounds = tighten_bounds(lirpa, x, bounds, [(-1, [0], [i], [], [])])
+        nb = NewBounds(active=(len(bounds) - 1, 0, i))
+        bounds = tighten_bounds(lirpa, x, bounds, nb, forward=True)
         key2 = list(bounds)[-2]
         tightened = (
             (bounds[key2][0] > old_bounds[key2][0]).any().item()  #
@@ -124,7 +126,7 @@ def test_tighten():
             k: (torch.cat((lb, lb - 0.1)), torch.cat((ub, ub + 0.1)))
             for k, (lb, ub) in bounds.items()
         }
-        new_bounds = tighten_bounds(lirpa, x2, new_bounds)
+        new_bounds = tighten_bounds(lirpa, x2, new_bounds, forward=True)
         for a, (lb, ub), (olb, oub) in zip(
             act, new_bounds.values(), old_bounds.values()
         ):
@@ -133,6 +135,9 @@ def test_tighten():
             assert (lb < ub).all().item()
             assert (lb > olb - 1e-6).all().item()
             assert (ub < oub + 1e-6).all().item()
+
+        nb.add_active(len(bounds) - 1, 0, torch.arange(10))
+        tighten_bounds(lirpa, x2, new_bounds, nb, forward=True)
         if tightened:
             return
     warn("test_tighten: Could not find a case that tightened the previous bounds.")
@@ -151,8 +156,9 @@ def test_tighten_conv():
     key = list(bounds)[-1]
     bounds[key][0][0, 0] = (bounds[key][0][0, 0] + bounds[key][1][0, 0]) * 0.5
     bounds[key][0][1, 0] = (bounds[key][0][1, 0] + bounds[key][1][1, 0]) * 0.5
-    bounds = tighten_bounds(lirpa, x, bounds, [(-1, [0], [0], [0], [0])])
-    bounds = tighten_bounds(lirpa, x, bounds, None, "backward")
+    nb = NewBounds(active=(len(bounds) - 2, 0, 0), inactive=(len(bounds) - 2, 0, 0))
+    bounds = tighten_bounds(lirpa, x, bounds, nb, forward=True)
+    bounds = tighten_bounds(lirpa, x, bounds, None, forward=True)
     for k, (ol, ou) in old_bounds.items():
         (nl, nu) = bounds[k]
         assert (nl > ol - 1e-6).all().item()
@@ -197,19 +203,19 @@ def test_back():
             upper,
             lower_next,
             upper_next,
-            *([0], [i], [1], [2]),
+            [(0, [i], []), (1, [], [2])],
         )
         assert (lower <= upper).all().item()
         mask1 = ((ly >= lower_next[None]) & (uy <= upper_next[None])).all(-1)
         mask2 = ((X >= lower[None]) & (X <= upper[None])).all(-1)
         assert (mask1 <= mask2).all().item()
-        tighten_backwards(
+        lower_alt[:1], upper_alt[:1] = tighten_backwards(
             uA[None, 0, i],
             ubias[0, i] - lower_next[0, i],
             lower_alt[:1],
             upper_alt[:1],
         )
-        tighten_backwards(
+        lower_alt[1:], upper_alt[1:] = tighten_backwards(
             -lA[None, 1, 2],
             -lbias[1, 2] + upper_next[1, 2],
             lower_alt[1:],
@@ -235,22 +241,22 @@ def test_back_2d():
     uA = torch.zeros(1, 1, 2)
     uA[0, 0, 0] = 1.0
     ubias = torch.zeros(1, 1)
-    idx = ([0], [0], [0], [0])
+    batches = [(0, [0], [0])]
     tighten_bounds_back(
-        lA, lbias, uA, ubias, lower, upper, lower_next, upper_next, *idx
+        lA, lbias, uA, ubias, lower, upper, lower_next, upper_next, batches
     )
     assert torch.all(lower == -1).cpu().item()
     assert torch.all(upper == 1).cpu().item()
     lower_next[0, 0] = -0.5
     upper_next[0, 0] = 1.0
     tighten_bounds_back(
-        lA, lbias, uA, ubias, lower, upper, lower_next, upper_next, *idx
+        lA, lbias, uA, ubias, lower, upper, lower_next, upper_next, batches
     )
     assert torch.all(upper == 1).cpu().item()
     assert torch.allclose(lower, torch.tensor([[-0.5, -1.0]]))
     upper_next[0, 0] = 0.0
     tighten_bounds_back(
-        lA, lbias, uA, ubias, lower, upper, lower_next, upper_next, *idx
+        lA, lbias, uA, ubias, lower, upper, lower_next, upper_next, batches
     )
     assert torch.allclose(upper, torch.tensor([[1.0, 0.5]]))
     assert torch.allclose(lower, torch.tensor([[-0.5, -1.0]]))

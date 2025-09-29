@@ -1,7 +1,11 @@
 import torch
 
-from premap2.splitting import calc_priority
-from premap2.utils import WithActivations
+from premap2.sampling import calc_samples
+from premap2.splitting import (
+    calc_priority,
+    stabilize_on_samples,
+)
+from premap2.utils import WithActivations, split_contains2
 from tests.premap2.utils import model_linear
 
 
@@ -36,3 +40,24 @@ def test_heuristic():
     pri = calc_priority(X, yc, act, None, uAs, lower, upper, unstable, **coefs)
     coefs = {k: 0.0 for k in coefs}
     calc_priority(X, yc, act, lAs, uAs, lower, upper, unstable, **coefs)
+
+
+def test_sample_stability():
+    lower = torch.tensor([[0.0, 0.0]])
+    upper = torch.tensor([[1.0, 1.0]])
+    model = model_linear(2, 3, 2)
+    samples = calc_samples((lower, upper), model, num=10)
+    assert samples.activations is not None
+    lower = [
+        torch.minimum(act.min(0)[0][None], -act.new_ones(1))
+        for act in samples.activations
+    ]
+    upper = [
+        torch.maximum(act.max(0)[0][None], act.new_ones(1))
+        for act in samples.activations
+    ]
+    history = [([], []) for _ in lower]
+    stabilize_on_samples([samples], [history], lower, upper)
+    if sum(len(i) for i, _ in history) == 0:
+        return test_sample_stability()
+    assert split_contains2(history, samples.activations).all()

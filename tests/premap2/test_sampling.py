@@ -5,8 +5,9 @@ from premap2.sampling import (
     calc_samples,
     get_constraints,
     get_hit_and_run_samples,
+    sparse_patches_to_matrix,
 )
-from premap2.utils import polytope_contains, split_contains2
+from premap2.utils import polytope_contains, split_contains, split_contains2
 from tests.premap2.utils import model_conv, model_linear
 
 
@@ -69,3 +70,40 @@ def test_sample():
         s = calc_samples(s, model, 100, hist)
         s.activations = None
         s = calc_samples(s, model, 100, hist)
+
+
+def test_split():
+    lower = torch.tensor([[0.0, 0.0]])
+    upper = torch.tensor([[1.0, 1.0]])
+    model = model_linear(2, 3, 2)
+    samples = calc_samples((lower, upper), model, num=10)
+    layer_index = 0
+    active_count = (samples.activations[layer_index] >= 0).count_nonzero(0)
+    neuron_index = int(((active_count - 5).abs().argmin()).cpu().item())
+    samples_a, samples_b = samples.split(layer_index, neuron_index)
+
+    assert len(samples_a) + len(samples_b) == len(samples)
+    assert (samples_a.activations[layer_index].flatten(1)[:, neuron_index] >= 0).all()
+    assert (samples_b.activations[layer_index].flatten(1)[:, neuron_index] <= 0).all()
+
+    # Ensure that the constraints are added correctly
+    if len(samples_a) == 0 or len(samples_b) == 0:
+        samples_a.constrain(layer_index, neuron_index, active=True)
+        samples_b.constrain(layer_index, neuron_index, active=False)
+    assert samples_a.constraints == [([], [neuron_index])]
+    assert samples_b.constraints == [([neuron_index], [])]
+
+    assert split_contains(samples_a.constraints, samples_a.activations).all()
+    assert split_contains(samples_b.constraints, samples_b.activations).all()
+
+
+def test_sparse_to_matrix():
+    from premap2.sampling import Patches
+
+    img = torch.rand((1, 3, 10, 10))
+    p = torch.rand(5, 1, 4, 4, 3, 3, 3)
+    p = Patches(p, 2, 0, p.shape, output_shape=p.shape[:4])
+    idx = [10, 33]
+    a = p.to_matrix(img.shape)[0][idx]
+    b = sparse_patches_to_matrix(p, idx, img.shape)[0]
+    assert torch.allclose(a, b)
