@@ -1,6 +1,8 @@
+import io
 import sys
+from contextlib import redirect_stdout
 from pathlib import Path
-from typing import Any, Callable
+from typing import IO, Any, Callable
 
 import torch
 import yaml
@@ -69,8 +71,9 @@ def premap(
     post_config: None | Callable[[object], None] = None,
     premap_path: None | str = None,
     defaults: dict[str, object] | None = None,
+    silent: bool = False,
     **kwargs,
-) -> list[Path]:
+) -> list[Path] | list[IO[Any]]:
     """Wrapper for PREMAP that takes keyword arguments (instead of commandline arguments).
     For keyword arguments run `get_arguments()` or `uv run premap --help` for options.
 
@@ -81,10 +84,11 @@ def premap(
         post_config: Optional post processing function that takes `arguments.Config`.
         premap_path: Path to the `src` folder of the PREMAP package.
         defaults: Keyword arguments with lower priority than a config file.
+        silent: Do not print to stdout.
         **kwargs: Keyword arguments with higher priority than commandline and config file.
 
     Returns:
-        List of paths to the result files (typically just one) that can be loaded with `torch.load`.
+        List of result files (typically just one) that can be loaded with `torch.load`.
     """
     with PremapInPath(premap_path):
         import preimage_main  # type: ignore
@@ -95,7 +99,11 @@ def premap(
             defaults=defaults,
             **kwargs,
         )
-        return preimage_main.main()
+        if silent:
+            with redirect_stdout(io.StringIO()):
+                return preimage_main.main()
+        else:
+            return preimage_main.main()
 
 
 def get_arguments(

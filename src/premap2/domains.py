@@ -2,7 +2,7 @@ import time
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryFile
-from typing import Iterator, Protocol
+from typing import IO, Any, Iterator, Protocol
 
 import numpy as np
 import torch
@@ -175,13 +175,13 @@ def _has_tensor(item: object) -> bool:
 def save_premap(
     domains: PriorityDomains | tuple[float, float, dict[str, torch.Tensor]],
     config: dict,
-    dir_path: str | Path,
+    dir_path: str | Path | None = None,
     total_time: float = np.nan,
     success: bool = False,
     times: list[float] | None = None,
     coverages: list[float] | None = None,
     num_domains: list[int] | None = None,
-) -> Path:
+) -> Path | IO[Any]:
     """Save PREMAP results and configuration.
 
     Args:
@@ -228,9 +228,14 @@ def save_premap(
         "num_domains": num_domains,
         "coverages": coverages,
     }
-    dir_path = Path(dir_path)
-    dir_path.mkdir(parents=True, exist_ok=True)
-    path = dir_path / f"premap_{time.strftime('%Y-%m-%d_%H-%M-%S')}.pt"
-    torch.save(preimage_dict, path, pickle_protocol=5)
-    print("PREMAP results saved to:", str(path))
+    if dir_path is None:
+        path = TemporaryFile()
+        torch.save(preimage_dict, path, pickle_protocol=5)
+        path.seek(0)
+    else:
+        dir_path = Path(dir_path)
+        dir_path.mkdir(parents=True, exist_ok=True)
+        path = dir_path / f"premap_{time.strftime('%Y-%m-%d_%H-%M-%S')}.pt"
+        torch.save(preimage_dict, path, pickle_protocol=5)
+        print("PREMAP results saved to:", str(path))
     return path
