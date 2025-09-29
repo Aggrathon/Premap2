@@ -1101,10 +1101,12 @@ def parse_run_mode():
                 X, labels, data_max, data_min = arguments.Config["data"]["dataset"]
                 target_label = arguments.Config["preimage"].get("label", None)
                 runnerup = arguments.Config["preimage"].get("runner_up", None)
-                X, labels = torch.as_tensor(X), torch.atleast_1d(torch.as_tensor(labels))
+                X, labels = torch.atleast_2d(torch.as_tensor(X)), torch.atleast_1d(torch.as_tensor(labels))
                 data_max, data_min = torch.as_tensor(data_max), torch.as_tensor(data_min)
                 assert X.size(0) == labels.size(0), "batch size of X and labels should be the same!"
                 assert (data_max - data_min).min()>=0, "data_max should always larger or equal to data_min!"
+                data_max = data_max.expand((1, *X.shape[1:]))
+                data_min = data_min.expand(data_max.shape)
             elif "MNIST" in arguments.Config["data"]["dataset"] or arguments.Config["data"]["dataset"].startswith("Customized("):  
                 X, labels, runnerup, data_max, data_min, perturb_epsilon, target_label = load_verification_dataset(perturb_epsilon)
             else:

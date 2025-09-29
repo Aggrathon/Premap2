@@ -81,6 +81,7 @@ class SortedReLUDomainList(AbstractReLUDomainList):
         # instance_lAs = [[] for _ in range(num)]
         # for i in range(num):
         #     instance_lAs[i] = [lA[i:(i+1)] for lA in lAs]
+        assert Cs.shape[1] == num
         candidate_domains = [ReLUDomain(*cov_info[i],
             A_list[i],
             bias_list[i],
@@ -92,7 +93,7 @@ class SortedReLUDomainList(AbstractReLUDomainList):
             instance_slopes[i],
             history=copy.deepcopy(history),
             depth=depths[i],
-            c=Cs[i:i+1],
+            c=Cs[None, :, i],
             threshold=thresholds[i] if thresholds.numel() > 1 else thresholds,
             beta=beta if beta is not None else None,
             samples=samples if samples is not None else None
@@ -213,7 +214,10 @@ class SortedReLUDomainList(AbstractReLUDomainList):
             return slopes, torch.cat(dm_l_all).to(device=device, non_blocking=True), torch.cat(dm_u_all).to(device=device, non_blocking=True), selected_candidate_domains, cs, thresholds
 
     def add_domain(self, relu_dm: "ReLUDomain"):
-        if torch.any(relu_dm.upper_bound < relu_dm.threshold).detach().cpu().item():
+        if relu_dm.priority == -np.inf:
+            # print(f"Subdomain fully explored ({relu_dm.preimg_vol * relu_dm.preimg_cov:.5f} / {relu_dm.preimg_vol:.5f} / {relu_dm.volume:.5f}).")
+            relu_dm.samples = relu_dm.beta = relu_dm.slope = relu_dm.intermediate_betas = relu_dm.lower_all =  relu_dm.upper_all = None
+        elif torch.any(relu_dm.upper_bound < relu_dm.threshold).detach().cpu().item():
             print(f"Skipping subdomain without preimage ({relu_dm.volume:.5f}).")
             return
         elif relu_dm.volume < 1e-6:
@@ -221,16 +225,13 @@ class SortedReLUDomainList(AbstractReLUDomainList):
             relu_dm.priority = -np.inf
             relu_dm.samples = relu_dm.beta = relu_dm.slope = relu_dm.intermediate_betas = relu_dm.lower_all =  relu_dm.upper_all = None
         elif torch.all(relu_dm.lower_bound > relu_dm.threshold).detach().cpu().item():
-            print(f"Subdomain fully verified ({relu_dm.preimg_vol * relu_dm.preimg_cov:.5f} / {relu_dm.preimg_vol:.5f} / {relu_dm.volume:.5f}).")
+            print(f"Subdomain fully verified ({relu_dm.approx_vol:.5f} / {relu_dm.preimg_vol:.5f} / {relu_dm.volume:.5f}).")
             relu_dm.samples = relu_dm.beta = relu_dm.slope = relu_dm.intermediate_betas = relu_dm.lower_all =  relu_dm.upper_all = None
             relu_dm.priority = -np.inf
             relu_dm.preimg_A = relu_dm.preimg_A.new_zeros(()).expand(relu_dm.preimg_A.shape)
             relu_dm.preimg_b = relu_dm.lower_bound
-            relu_dm.preimg_cov = 1.0
-            relu_dm.preimg_vol = relu_dm.volume
-        elif relu_dm.priority == -np.inf:
-            print(f"Subdomain fully explored ({relu_dm.preimg_vol * relu_dm.preimg_cov:.5f} / {relu_dm.preimg_vol:.5f} / {relu_dm.volume:.5f}).")
-            relu_dm.samples = relu_dm.beta = relu_dm.slope = relu_dm.intermediate_betas = relu_dm.lower_all =  relu_dm.upper_all = None
+            relu_dm.approx_vol = relu_dm.volume
+        assert relu_dm.preimg_vol <= relu_dm.volume, f'Invalid preimage volume: {relu_dm.preimg_vol} <= {relu_dm.volume}'
         self.domains.add(relu_dm)
     
 
@@ -592,7 +593,7 @@ class ReLUDomain:
     the lower bound estimated for the instances.
     """
 
-    def __init__(self, preimg_vol=None, preimg_cov=None, volume=1.0, preimg_A=None, preimg_b=None, lb=-float('inf'), ub=float('inf'), lb_all=None,
+    def __init__(self, preimg_vol=0.0, approx_vol=0.0, volume=1.0, preimg_A=None, preimg_b=None, lb=-float('inf'), ub=float('inf'), lb_all=None,
                 up_all=None, slope=None, beta=None, depth=None, split_history=None,
                 history=None,  gnn_decision=None, intermediate_betas=None, primals=None,
                 priority=0, c=None, threshold=np.float64(0.), samples=None):
@@ -601,7 +602,7 @@ class ReLUDomain:
         if split_history is None:
             split_history = []
         self.preimg_vol = preimg_vol
-        self.preimg_cov = preimg_cov
+        self.approx_vol = approx_vol
         self.preimg_A = preimg_A
         self.preimg_b = preimg_b
         self.volume = volume
@@ -636,11 +637,8 @@ class ReLUDomain:
         self.threshold = threshold
         if type(threshold) == int:
             self.threshold = np.float64(threshold)
-        if arguments.Config["preimage"]["under_approx"]:
-            self.priority = preimg_vol * (1 - preimg_cov)  # Higher priority will be more likely to be selected.
-        elif arguments.Config["preimage"]["over_approx"]:
-            self.priority = preimg_vol * (preimg_cov - 1)
-        if preimg_vol == 0 or preimg_cov == 1:
+        self.priority = abs(preimg_vol - approx_vol)  # Higher priority will be more likely to be selected.
+        if preimg_vol == 0 or approx_vol == preimg_vol:
             self.priority = -np.inf
 
     def __lt__(self, other):

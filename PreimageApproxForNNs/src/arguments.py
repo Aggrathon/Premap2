@@ -108,7 +108,7 @@ class ConfigHandler:
                           hierarchy=h + ["branch_budget"])
         self.add_argument("--multi_spec", type=str2bool, default=False, help='The multi specification support for preimage analysis.',
                     hierarchy=h + ["multi_spec"])
-        self.add_argument("--sample_instability", type=str2bool, default=False, help='Use sampling identified instability for preimage analysis.',
+        self.add_argument("--sample_instability", type=str2bool, default=True, help='Implicit splits with sampling identified stability for preimage analysis.',
                     hierarchy=h + ["instability"])
         self.add_argument("--save_process", type=str2bool, default=False, help='The save preimage polytope support for preimage analysis.',
                     hierarchy=h + ["save_process"])
@@ -253,7 +253,7 @@ class ConfigHandler:
                           hierarchy=h + ["vnnlib_path_prefix"])
 
         h = ["solver"]
-        self.add_argument("--batch_size", type=int, default=1,
+        self.add_argument("--batch_size", type=int, default=2,
                           help='Batch size in bound solver (number of parallel splits).', hierarchy=h + ["batch_size"])
         self.add_argument('--min_batch_size_ratio', type=float, default=1,
                           help='The minimum batch size ratio in each iteration (splitting multiple layers if the number of domains is smaller than min_batch_size_ratio * batch_size).',
