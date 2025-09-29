@@ -76,7 +76,7 @@ class ConfigHandler:
         h = ["preimage"]
         self.add_argument("--sample_dir", type=str, default=None, help='Directory to save and load samples for loss estimation and polytope coverage (deprecated).',
                           hierarchy=h + ["sample_dir"])
-        self.add_argument("--result_dir", type=str, default="", help='Result directory to specify for saving your results.',
+        self.add_argument("--result_dir", type=str, default=None, help='Result directory to specify for saving your results.',
                           hierarchy=h + ["result_dir"])
         self.add_argument("--over_approx", type=str2bool, default=False, help='To generate preimage over-approximation or not.',
                     hierarchy=h + ["over_approx"])

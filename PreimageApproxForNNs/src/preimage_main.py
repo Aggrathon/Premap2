@@ -569,8 +569,11 @@ def main():
         dual_param_enabled = arguments.Config["solver"]["beta-crown"]["beta"]
         preimage_over = arguments.Config["preimage"]["over_approx"]
         preimage_under = arguments.Config["preimage"]["under_approx"]
-        if len(arguments.Config["preimage"]["result_dir"]) > 0 and not os.path.exists(arguments.Config["preimage"]["result_dir"]):
-            os.makedirs(arguments.Config["preimage"]["result_dir"])
+        if arguments.Config["preimage"]["result_dir"] is None:
+            print('--- Log ends ---')
+            continue
+        if arguments.Config["preimage"]["result_dir"]:
+            os.makedirs(arguments.Config["preimage"]["result_dir"], exist_ok=True)
         log_file = os.path.join(arguments.Config["preimage"]["result_dir"], '{}_input_enable_{}_beta_{}.txt'.format(re.sub('\\W', '_', dataset_tp), split_input_aligned, dual_param_enabled))
         with open(log_file, "a") as f:
             approx = 'Over' if preimage_over else 'Under' if preimage_under else ''
