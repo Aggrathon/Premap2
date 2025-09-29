@@ -1,4 +1,7 @@
+import numbers
 import sys
+from itertools import repeat
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -61,7 +64,9 @@ class WithActivations:
 
 
 def split_contains(
-    history: list[tuple[list[int], list[int]]], activations: list[torch.Tensor]
+    history: list[tuple[torch.LongTensor, torch.LongTensor]],
+    activations: list[torch.Tensor],
+    epsilon: float | None = None,
 ) -> torch.Tensor | slice:
     """Return a mask for all items within the split.
     This version takes the history as index_below&index_above.
@@ -69,33 +74,41 @@ def split_contains(
     Args:
         history: Split history (layers[(below, above)]).
         activations: Activations of the pre relu layers.
+        epsilon: Numerical tolerance.
 
     Returns:
         Mask of items inside the split.
     """
     mask = True
     for (below, above), a in zip(history, activations):
-        if above:
-            mask = (a.flatten(1)[:, above] >= 0).all(1) & mask
-        if below:
-            mask = (a.flatten(1)[:, below] <= 0).all(1) & mask
+        eps = torch.finfo(a.dtype).eps if epsilon is None else epsilon
+        if len(above):
+            mask = (a.flatten(1)[:, above].min(1)[0] > -eps) & mask
+        if len(below):
+            mask = (a.flatten(1)[:, below].max(1)[0] < eps) & mask
     if isinstance(mask, bool):
         return slice(None)
     return mask
 
 
 def history_to_index(
-    history: list[tuple[list[int], list[float]]],
-) -> list[tuple[list[int], list[int]]]:
+    history: list[tuple[list[int], list[float]]], sort: bool = False
+) -> list[tuple[torch.LongTensor, torch.LongTensor]]:
     """Converts the history from index&sign to index_below&index_above."""
+    array = sorted if sort else list
     return [
-        ([i for i, s in zip(*h) if s < 0], [i for i, s in zip(*h) if s >= 0])
+        (
+            torch.LongTensor(array(i for i, s in zip(*h) if s < 0)),
+            torch.LongTensor(array(i for i, s in zip(*h) if s >= 0)),
+        )
         for h in history
     ]
 
 
 def split_contains2(
-    history: list[tuple[list[int], list[float]]], activations: list[torch.Tensor]
+    history: list[tuple[list[int], list[float]]],
+    activations: list[torch.Tensor],
+    epsilon: float | None = None,
 ) -> torch.Tensor | slice:
     """Return a mask for all items within the split.
     This version takes the history as index&sign.
@@ -103,11 +116,12 @@ def split_contains2(
     Args:
         history: Split history (layers[(index, sign)]).
         activations: Activations of the pre relu layers.
+        epsilon: Numerical tolerance.
 
     Returns:
         Mask of items inside the split.
     """
-    return split_contains(history_to_index(history), activations)
+    return split_contains(history_to_index(history), activations, epsilon)
 
 
 def polytope_contains(
@@ -116,7 +130,7 @@ def polytope_contains(
     b: torch.Tensor | None = None,
     lower: torch.Tensor | None = None,
     upper: torch.Tensor | None = None,
-    epsilon: float = 0.0,
+    epsilon: float | None = None,
 ) -> torch.Tensor | slice:
     """Return a mask for all items within the polytope.
 
@@ -126,20 +140,97 @@ def polytope_contains(
         b: Polytope constraints bias.
         lower: Lower bounds.
         upper: Upper bounds.
-        epsilon: Tolerance.
+        epsilon: Numerical tolerance.
 
     Returns:
         Mask of items inside the polytope.
     """
+    epsilon = torch.finfo(X.dtype).eps if epsilon is None else epsilon
     if A is not None:
         assert b is not None
         check = torch.all(torch.einsum("n...,b...->nb", X, A) + b[None] >= -epsilon, 1)
     else:
         check = True
     if lower is not None:
-        check &= (X >= lower).flatten(1).all(1)
+        check &= (X > lower - epsilon).flatten(1).all(1)
     if upper is not None:
-        check &= (X <= upper).flatten(1).all(1)
+        check &= (X < upper + epsilon).flatten(1).all(1)
     if check is True:
         return slice(None)
     return check
+
+
+def assert_bounds(
+    X: torch.Tensor | list[torch.Tensor],
+    lower: torch.Tensor | float | list[torch.Tensor] | list[float],
+    upper: torch.Tensor | float | list[torch.Tensor] | list[float],
+    epsilon: float | None = None,
+):
+    if (
+        isinstance(X, torch.Tensor)
+        and isinstance(lower, (torch.Tensor, numbers.Real))
+        and isinstance(upper, (torch.Tensor, numbers.Real))
+    ):
+        # Large GMMs are non-deterministic, so we need a suprisingly large epsilon
+        epsilon = torch.finfo(X.dtype).eps ** 0.5 * 0.5 if epsilon is None else epsilon
+        assert (X > lower - epsilon).all()
+        assert (X < upper + epsilon).all()
+    else:
+        for x, lb, ub in zip(X, lower, upper):
+            assert_bounds(x, lb, ub, epsilon)
+
+
+def assert_contains_hii(
+    activations: list[torch.Tensor],
+    history: list[tuple[torch.LongTensor, torch.LongTensor]],
+    lower: list[torch.Tensor] | None = None,
+    upper: list[torch.Tensor] | None = None,
+    epsilon: float | None = None,
+):
+    if lower is None:
+        lower = repeat(None)  # type: ignore
+    if upper is None:
+        upper = repeat(None)  # type: ignore
+    for act, (below, above), lb, ub in zip(activations, history, lower, upper):
+        # Large GMMs are non-deterministic, so we need a suprisingly large epsilon
+        eps = torch.finfo(act.dtype).eps ** 0.5 * 0.5 if epsilon is None else epsilon
+        if lb is not None:
+            assert (act > lb - eps).all()
+        if ub is not None:
+            assert (act < ub + eps).all()
+        if len(below):
+            assert (act.flatten(1)[:, below] < eps).all()
+        if len(above):
+            assert (act.flatten(1)[:, above] > -eps).all()
+
+
+def assert_contains_his(
+    activations: list[torch.Tensor],
+    history: list[tuple[list[int], list[float]]],
+    lower: list[torch.Tensor] | None = None,
+    upper: list[torch.Tensor] | None = None,
+    epsilon: float | None = None,
+):
+    assert_contains_hii(activations, history_to_index(history), lower, upper, epsilon)
+
+
+def results_contains(
+    X: torch.Tensor, results: Path | dict[str, object], model: torch.nn.Module, **kwargs
+) -> torch.Tensor:
+    _, activations = WithActivations(model)(X)
+    if not isinstance(results, dict):
+        results = torch.load(results, **kwargs)
+    contains = torch.zeros(X.shape[0], dtype=torch.bool)
+    for A, b, _, _, hist in results["domains"]:  # type: ignore
+        contp = polytope_contains(X, A, b)
+        if isinstance(contp, slice):
+            conts = split_contains(history_to_index(hist), activations)
+            if not isinstance(conts, slice):
+                contains |= conts
+        elif contp.any():
+            conts = split_contains(history_to_index(hist), activations)
+            if isinstance(conts, slice):
+                contains |= contp
+            else:
+                contains |= contp & conts
+    return contains

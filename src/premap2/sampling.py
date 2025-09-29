@@ -1,7 +1,10 @@
-from dataclasses import dataclass
+from copy import copy
+from dataclasses import dataclass, field
 from typing import TypeVar
 
+import numpy as np
 import torch
+from sortedcontainers import SortedList
 
 from auto_LiRPA.patches import Patches
 from premap2.raycast import raycast_batch
@@ -9,6 +12,7 @@ from premap2.tighten_bounds import tighten_backwards
 from premap2.utils import (
     IS_TEST_OR_DEBUG,
     WithActivations,
+    assert_contains_hii,
     history_to_index,
     polytope_contains,
     split_contains,
@@ -30,6 +34,8 @@ class Samples:
     upper: torch.Tensor
     activations: None | list[torch.Tensor] = None
     priority: None | list[torch.Tensor] = None
+    constraints: list[tuple[list[int], list[int]]] = field(default_factory=list)
+    stabilized: dict[tuple[int, bool], torch.LongTensor] = field(default_factory=dict)
     A: torch.Tensor | None = None
     b: torch.Tensor | None = None
     lAs: list[torch.Tensor] | None = None
@@ -57,6 +63,8 @@ class Samples:
             self.upper,
             [v[mask].contiguous() for v in self.activations],
             self.priority,
+            constraints=self.constraints,
+            stabilized=self.stabilized,
             A=self.A,
             b=self.b,
             lAs=self.lAs,
@@ -73,6 +81,8 @@ class Samples:
             self.upper,
             [v[mask].contiguous() for v in self.activations],
             self.priority,
+            constraints=self.constraints,
+            stabilized=self.stabilized,
             A=self.A,
             b=self.b,
             lAs=self.lAs,
@@ -81,12 +91,41 @@ class Samples:
             counter=self.counter,
             num=self.num,
         )
+        ll = len(samples_left)
+        lr = len(samples_right)
+        ls = ll + lr
+        if ll > 0 and ll + ls // 200 < ls:
+            samples_left.constrain(layer, index, True)
+        if lr > 0 and lr + ls // 200 < ls:
+            samples_right.constrain(layer, index, False)
         return samples_left, samples_right
 
-    def reuse(self) -> "Samples":
-        """Reuse the samples. Triggers a recalculation of the priorities if they are not fresh enough."""
+    def constrain(self, layer: int, index: int, active: bool):
+        """Add split to the constraints being calculated in `calc_constraints`.
+        Call this after `Samples.split` if the split is not trivial.
+
+        Args:
+            layer: Layer of split.
+            index: Index of split.
+            above: Is `self` the first of second result from `Samples.split`?
+        """
+        self.constraints = copy(self.constraints)
+        while len(self.constraints) <= layer:
+            self.constraints.append((SortedList(), SortedList()))
+        bl, ab = self.constraints[layer]
+        self.constraints[layer] = (bl, ab + [index]) if active else (bl + [index], ab)
+
+    def stabilize(self, layer: int, index: int | torch.LongTensor, active: bool):
+        if not isinstance(index, torch.Tensor):
+            index = torch.LongTensor([index])
+        if (layer, active) in self.stabilized:
+            index = torch.cat((self.stabilized[(layer, active)], index))
+        self.stabilized[(layer, active)] = index
+
+    def reuse(self, max_count: int = 2) -> "Samples":
+        """Reuse the samples. Triggers a recalculation of the priorities after enough reuses."""
         self.counter += 1
-        if self.counter >= 2:
+        if self.counter >= max_count:
             self.counter = 0
             self.priority = None
         return self
@@ -104,6 +143,8 @@ class Samples:
             upper=_move_to(self.upper, device, non_blocking),
             activations=_move_to(self.activations, device, non_blocking),
             priority=_move_to(self.priority, device, non_blocking),
+            constraints=self.constraints,
+            stabilized=self.stabilized,
             A=_move_to(self.A, device, non_blocking),
             b=_move_to(self.b, device, non_blocking),
             lAs=_move_to(self.lAs, device, non_blocking),
@@ -168,9 +209,9 @@ class LinearBounds:
 def calc_constraints(
     net: "LiRPAConvNet",
     samples: list[Samples],
-    history: list[list[tuple[list[int], list[float]]]] | None,
     lower: list[torch.Tensor],
     upper: list[torch.Tensor],
+    num_samples: int = 20_000,
     debug: bool = IS_TEST_OR_DEBUG,
 ):
     """Calculate constraints to store in the `samples` (used to calculate priorities and sampling polytopes).
@@ -178,7 +219,6 @@ def calc_constraints(
     Args:
         net: LiRPA wrapped network.
         samples: batch of `Samples`.
-        history: Split history.
         lower: Lower bounds.
         upper: Upper bounds.
         debug: Activate additional asserts. Defaults to False unless debugging.
@@ -186,22 +226,18 @@ def calc_constraints(
     # This function assumes it is called directly after ´net.get_lower_bound´
     for i, s in enumerate(samples):
         if net.net.relus[0].inputs[0].lA is not None:
-            s.lAs = [
-                input.lA.detach()[:, i]
-                for relu in net.net.relus
-                for input in relu.inputs  # ReLUs have only one input
-            ]
+            s.lAs = [relu.inputs[0].lA.detach()[:, i] for relu in net.net.relus]
         if net.net.relus[0].inputs[0].uA is not None:
-            s.uAs = [
-                input.uA.detach()[:, i]
-                for relu in net.net.relus
-                for input in relu.inputs  # ReLUs have only one input
-            ]
-    if history is None:
+            s.uAs = [relu.inputs[0].uA.detach()[:, i] for relu in net.net.relus]
+    limit = num_samples * 8 // 10
+    for s in samples:
+        s.A = s.b = None
+    if all((len(s.constraints) == 0) or (len(s) > limit) for s in samples):
         return
     Abs = net.get_intermediate_constraints(range(len(samples[0].activations)))
-    for i, (s, hist) in enumerate(zip(samples, history)):
-        hist = history_to_index(hist)
+    for i, s in enumerate(samples):
+        if (len(s.constraints) == 0) or (len(s) > limit):
+            continue
         ab = [
             LinearBounds(
                 _get_Abs(input, "lA", i),
@@ -214,10 +250,9 @@ def calc_constraints(
             for layer, lb, ub in zip(Abs, lower, upper)
             for input in layer.values()
         ]
-        s.A, s.b = get_constraints(hist, ab, s.lower, s.upper, debug=debug)
-        if s.A is not None and s.mask is not None:
-            s.b = s.b + (s.A * s.lower)[:, ~s.mask].sum(1)
-            s.A = s.A[:, s.mask]
+        s.A, s.b = get_constraints(
+            s.constraints, ab, s.lower, s.upper, s.mask, debug=debug
+        )
 
 
 def _get_Abs(
@@ -241,6 +276,7 @@ def get_constraints(
     layers: list[LinearBounds],
     lower: torch.Tensor,
     upper: torch.Tensor,
+    mask: torch.Tensor | None = None,
     debug: bool = IS_TEST_OR_DEBUG,
 ) -> tuple[torch.Tensor, torch.Tensor] | tuple[None, None]:
     """Extract input constraints from linear bounds.
@@ -260,33 +296,49 @@ def get_constraints(
         if above:
             A, b, c = Ab.uA, Ab.ub.flatten(), Ab.lower.flatten()
             if isinstance(A, Patches):
-                A = A.to_matrix(lower.shape)[0]
-            As.append(A[above])
+                As.append(sparse_patches_to_matrix(A, above, lower.shape)[0])
+            else:
+                As.append(A[above])
             bs.append(b[above] - c[above].to(b.device))
         if below:
             A, b, c = Ab.lA, Ab.lb.flatten(), Ab.upper.flatten()
             if isinstance(A, Patches):
-                A = A.to_matrix(lower.shape)[0]
-            As.append(-A[below])
+                As.append(-sparse_patches_to_matrix(A, below, lower.shape)[0])
+            else:
+                As.append(-A[below])
             bs.append(c[below].to(b.device) - b[below])
     As, bs = torch.cat(As), torch.cat(bs)
     if As.shape[0] > 0:
         mid = (lower + upper) * 0.5
         dif = (upper - lower) * 0.5
         eps = torch.finfo(lower.dtype).eps * 3
-        mask = (As * mid - As.abs() * dif).flatten(1).sum(1) + bs < -eps
-        if not mask.all().item():
+        filter = (As * mid - As.abs() * dif).flatten(1).sum(1) + bs < -eps
+        if not filter.all().item():
             # Some constraint boundaries might lie completely outside the bounding box
-            As, bs = As[mask], bs[mask]
+            As, bs = As[filter], bs[filter]
     if As.shape[0] > 0:
-        return As, bs
+        if mask is not None:
+            bs = bs + (As * lower)[:, ~mask].sum(1)
+            As = As[:, mask]
+        return As.contiguous(), bs.contiguous()
     return None, None
+
+
+def sparse_patches_to_matrix(
+    patch: Patches, indices: list[int], shape: torch.Size
+) -> torch.Tensor:
+    c, _, w, h, *_ = patch.shape
+    c, w, h = np.unravel_index(indices, (c, w, h))
+    c, w, h = torch.tensor(c), torch.tensor(w), torch.tensor(h)
+    return patch.create_similar(
+        patches=patch.patches[c, :, w, h, ...], unstable_idx=(c, w, h)
+    ).to_matrix(shape)
 
 
 def calc_samples(
     x: Samples | tuple[torch.Tensor, torch.Tensor],
     model: torch.nn.Module,
-    num: int = 10_000,
+    num: int = 2_000,
     history: list[tuple[list[int], list[float]]] | None = None,
     debug: bool = IS_TEST_OR_DEBUG,
 ) -> Samples:
@@ -309,7 +361,7 @@ def calc_samples(
 def get_samples(
     x: Samples | tuple[torch.Tensor, torch.Tensor],
     model: torch.nn.Module,
-    samples: int = 10_000,
+    samples: int = 2_000,
     history: list[tuple[list[int], list[float]]] | None = None,
     debug: bool = IS_TEST_OR_DEBUG,
 ) -> Samples:
@@ -346,7 +398,7 @@ def get_samples(
             upper = upper[:1]
         A = b = lAs = uAs = X = y = act = None
         mask = (lower < upper)[0]
-        if mask.count_nonzero() >= mask.numel() - 2:
+        if mask.count_nonzero() > mask.numel() // 2:
             mask = None
     if history is None or sum((len(h[0]) for h in history), 0) == 0:
         # Without a domain we can just sample the bounding box
@@ -360,21 +412,21 @@ def get_samples(
             X, y, lower, upper, act, lAs=lAs, uAs=uAs, mask=mask, num=samples
         )
     if X is None or X.shape[0] < samples // 2:
-        history = history_to_index(history)
+        histori = history_to_index(history, sort=True)
         if A is not None:
             assert b is not None
-            lower, upper = lower.clone(), upper.clone()
             if mask is not None:
-                mlower = lower[:, mask]
-                mupper = upper[:, mask]
-                tighten_backwards(A, b, mlower, mupper, debug)
+                mlower, mupper = tighten_backwards(
+                    A, b, lower[:, mask], upper[:, mask], debug=debug
+                )
                 if debug and X is not None:
                     con = polytope_contains(X[:, mask], A, b, mlower, mupper).all()
                     assert con.cpu().item()
+                lower, upper = lower.clone(), upper.clone()
                 lower[:, mask] = mlower
                 upper[:, mask] = mupper
             else:
-                tighten_backwards(A, b, lower, upper, debug)
+                lower, upper = tighten_backwards(A, b, lower, upper, debug)
                 if debug and X is not None:
                     assert polytope_contains(X, A, b, lower, upper).all().cpu().item()
         # Since ReLU splits are non-convex, we use rejection sampling.
@@ -388,18 +440,12 @@ def get_samples(
             upper,
             model,
             samples,
-            history,
+            history=histori,
             mask=mask,
             debug=debug,
         )
         if debug:
-            check = True
-            for (below, above), a in zip(history, act):
-                if above:
-                    check = (a.flatten(1)[:, above] >= 0).all(1) & check
-                if below:
-                    check = (a.flatten(1)[:, below] <= 0).all(1) & check
-            assert check.all().cpu().item()
+            assert_contains_hii(act, histori)
     return Samples(
         X, y, lower, upper, act, A=A, b=b, lAs=lAs, uAs=uAs, mask=mask, num=samples
     )
@@ -509,7 +555,7 @@ def rejection_sample(
     upper: torch.Tensor,
     model: WithActivations | torch.nn.Module,
     samples: int,
-    history: list[tuple[list[int], list[int]]],
+    history: list[tuple[torch.LongTensor, torch.LongTensor]],
     mask: torch.Tensor | None = None,
     max_iter: int = 20,
     debug: bool = IS_TEST_OR_DEBUG,

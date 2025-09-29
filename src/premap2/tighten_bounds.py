@@ -1,16 +1,60 @@
+from collections import defaultdict
+from typing import Any, Iterable
+
 import torch
 
 from auto_LiRPA import BoundedModule, BoundedTensor
-from premap2.utils import IS_TEST_OR_DEBUG, is_int
+from premap2.utils import IS_TEST_OR_DEBUG
+
+
+class NewBounds:
+    def __init__(self, *, active: None | Any = None, inactive: None | Any = None):
+        self.spec = defaultdict(
+            lambda: defaultdict(lambda: (torch.LongTensor(), torch.LongTensor()))
+        )
+        if active is not None:
+            self.add_active(*active)
+        if inactive is not None:
+            self.add_inactive(*inactive)
+
+    @torch.no_grad()
+    def add_active(self, layer: int, batch: int, index: int | torch.LongTensor):
+        if isinstance(index, torch.Tensor):
+            index = torch.atleast_1d(index)
+        else:
+            index = torch.LongTensor([index])
+        if index.numel() > 0:
+            act, ina = self.spec[layer][batch]
+            self.spec[layer][batch] = (torch.cat((act, index)), ina)
+
+    @torch.no_grad()
+    def add_inactive(self, layer: int, batch: int, index: int | torch.LongTensor):
+        if isinstance(index, torch.Tensor):
+            index = torch.atleast_1d(index)
+        else:
+            index = torch.LongTensor([index])
+        if index.numel() > 0:
+            act, ina = self.spec[layer][batch]
+            self.spec[layer][batch] = (act, torch.cat((ina, index)))
+
+    def add_split(
+        self, layer: int, batch: int, index: int | torch.LongTensor, batches: int
+    ):
+        self.add_active(layer, batch, index)
+        self.add_inactive(layer, batch + batches // 2, index)
+
+    def iter(
+        self,
+    ) -> Iterable[tuple[int, list[tuple[int, torch.LongTensor, torch.LongTensor]]]]:
+        for layer in sorted(self.spec.keys()):
+            yield layer, [(b, act, ina) for b, (act, ina) in self.spec[layer].items()]
 
 
 def tighten_bounds(
     lirpa: BoundedModule,
     x: BoundedTensor,
     bounds: dict[str, tuple[torch.Tensor, torch.Tensor]],
-    split: None
-    | tuple[int, int]
-    | list[tuple[int, list[int], list[int], list[int], list[int]]] = None,
+    new_bounds: None | tuple[int, int] | NewBounds = None,
     debug: bool = IS_TEST_OR_DEBUG,
     **kwargs,
 ) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
@@ -20,30 +64,31 @@ def tighten_bounds(
         lirpa: LiRPA wrapped network.
         x: Input specification.
         bounds: Lower and upper bounds for each layer.
-        split: Just performed splits.
+        new_bounds: New bounds that should be propagated backwards.
         debug: Activate additional asserts. Defaults to False unless debugging.
 
     Returns:
         Tightened `bounds`.
     """
-    if split is not None:
-        if len(split) == 2 and is_int(split[0]) and is_int(split[1]):
-            layer, index = split
-            layer = min(layer, len(lirpa.relus) + layer)
-            lower = torch.arange(x.shape[0] // 2)
-            upper = torch.arange(x.shape[0] // 2, x.shape[0])
-            split = [(layer, lower, index, upper, index)]
-        for layer, lb, li, ub, ui in sorted(split):
-            tighten_bounds_backward(
-                lirpa, x, bounds, layer, lb, li, ub, ui, debug=debug, **kwargs
+    start_layer = len(lirpa.relus)
+    if new_bounds is not None:
+        if not isinstance(new_bounds, NewBounds):
+            layer, index = new_bounds
+            new_bounds = NewBounds()
+            new_bounds.add_split(layer, 0, index, x.shape[0])
+        for layer, batches in new_bounds.iter():
+            layer = tighten_bounds_backward(
+                lirpa, x, bounds, layer, batches, debug=debug, **kwargs
             )
-    return tighten_bounds_forward(lirpa, x, bounds, **kwargs, debug=debug)
+            start_layer = min(start_layer, layer)
+    return tighten_bounds_forward(lirpa, x, bounds, start_layer, **kwargs, debug=debug)
 
 
 def tighten_bounds_forward(
     lirpa: BoundedModule,
     x: BoundedTensor,
     bounds: dict[str, tuple[torch.Tensor, torch.Tensor]],
+    start_layer: int = -1,
     debug: bool = IS_TEST_OR_DEBUG,
     **kwargs,
 ) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
@@ -58,6 +103,12 @@ def tighten_bounds_forward(
     Returns:
         Tightened `bounds`.
     """
+    start_layer = -1
+    if start_layer + 1 >= len(lirpa.relus):
+        return bounds
+    fix_relus = [lirpa.input_name[0]] if lirpa.input_name[0] in bounds else []
+    if start_layer >= 0:
+        fix_relus.extend(n for r in lirpa.relus[: start_layer + 1] for n in r.inputs)
     lirpa.compute_bounds(
         x=(x,),
         final_node_name=lirpa.relus[-1].inputs[0].name,
@@ -65,15 +116,18 @@ def tighten_bounds_forward(
         bound_upper=True,
         bound_lower=True,
         reference_bounds=bounds,
+        intermediate_layer_bounds={k: bounds[k] for k in fix_relus},
     )
     for key, (lbo, ubo) in bounds.items():
-        if getattr(lirpa[key], "lower", None) is not None:
+        if key not in fix_relus and getattr(lirpa[key], "lower", None) is not None:
             if debug:
                 eps = torch.finfo(ubo.dtype).eps * 2
                 assert (lirpa[key].lower <= ubo + eps).all().cpu().item()
                 assert (lirpa[key].upper >= lbo - eps).all().cpu().item()
-            lbo[:] = torch.clamp(lirpa[key].lower.detach(), lbo, ubo)
-            ubo[:] = torch.clamp(lirpa[key].upper.detach(), lbo, ubo)
+            bounds[key] = (
+                torch.clamp(lirpa[key].lower.detach(), lbo, ubo).contiguous(),
+                torch.clamp(lirpa[key].upper.detach(), lbo, ubo).contiguous(),
+            )
     return bounds
 
 
@@ -82,13 +136,10 @@ def tighten_bounds_backward(
     x: BoundedTensor,
     bounds: dict[str, tuple[torch.Tensor, torch.Tensor]],
     layer: int,
-    lower_b: list[int],
-    lower_i: list[int],
-    upper_b: list[int],
-    upper_i: list[int],
+    batches: list[tuple[int, torch.LongTensor, torch.LongTensor]],
     debug: bool = IS_TEST_OR_DEBUG,
     **kwargs,
-) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
+) -> int:
     """Tighten the bounds of previous layers (batched).
     This function runs LiRPA to get linear bounds.
 
@@ -97,27 +148,29 @@ def tighten_bounds_backward(
         x: Input specification.
         bounds: Lower and upper bounds per layer.
         layer: Layer to tighten bounds for.
-        lower_b: Batch indices of lower bound updates.
-        lower_i: Indices of lower bound updates.
-        upper_b: Batch indices of upper bound updates.
-        upper_i: Indices of upper bound updates.
+        batches: List of neurons with new bounds: `(batch_index, active_indices, inactive_indices)`.
         debug: Activate additional asserts. Defaults to False unless debugging.
 
     Returns:
-        Tightened `bounds`.
+        The lowest modified layer.
     """
     final = lirpa.relus[layer].inputs[0].name
     prev = [r.name for r in lirpa.relus[:layer]]
     if lirpa.input_name[0] in bounds:
         prev.append(lirpa.input_name[0])
     if len(prev) == 0:
-        return bounds
-    c = x.new_zeros(x.shape[0], *lirpa.relus[layer].output_shape[1:])
-    c.view(c.shape[0], -1)[lower_b, lower_i] = 1.0
-    c.view(c.shape[0], -1)[upper_b, upper_i] = 1.0
+        return layer
+    num_out = max(ai.numel() + ii.numel() for _, ai, ii in batches)
+    c = x.new_zeros(x.shape[0], num_out, *lirpa.relus[layer].output_shape[1:])
+    for b, ai, ii in batches:
+        na, ni = ai.numel(), ii.numel()
+        c.view(c.shape[0], c.shape[1], -1)[b, range(na), ai] = 1.0
+        c.view(c.shape[0], c.shape[1], -1)[b, range(na, na + ni), ii] = 1.0
+    if debug:
+        assert c.sum().item() == sum(ai.numel() + ii.numel() for _, ai, ii in batches)
     _, _, A2 = lirpa.compute_bounds(
         x=(x,),
-        C=c[:, None],
+        C=c,
         final_node_name=final,
         **kwargs,
         bound_upper=True,
@@ -128,28 +181,28 @@ def tighten_bounds_backward(
         intermediate_layer_bounds=bounds,
     )
 
-    lb_curr, ub_curr = bounds[final]
-    for p in prev:
-        if p in bounds:
-            lb_prev, ub_prev = bounds[p]
-        else:
-            lb_prev, ub_prev = bounds[lirpa[p].inputs[0].name]
-        tighten_bounds_back(
-            A2[final][p]["lA"],
-            A2[final][p]["lbias"],
-            A2[final][p]["uA"],
-            A2[final][p]["ubias"],
-            lb_prev,
-            ub_prev,
-            lb_curr,
-            ub_curr,
-            lower_b,
-            lower_i,
-            upper_b,
-            upper_i,
-            debug=debug,
-        )
-    return bounds
+    with torch.no_grad():
+        lb_curr, ub_curr = bounds[final]
+        for i, p in enumerate(prev):
+            if p in bounds:
+                lb_prev, ub_prev = bounds[p]
+            else:
+                lb_prev, ub_prev = bounds[lirpa[p].inputs[0].name]
+            if tighten_bounds_back(
+                A2[final][p]["lA"],
+                A2[final][p]["lbias"],
+                A2[final][p]["uA"],
+                A2[final][p]["ubias"],
+                lb_prev,
+                ub_prev,
+                lb_curr,
+                ub_curr,
+                batches,
+                sparse_c=True,
+                debug=debug,
+            ):
+                layer = min(layer, i - 1)
+    return layer
 
 
 def tighten_bounds_back(
@@ -161,12 +214,10 @@ def tighten_bounds_back(
     ub_prev: torch.Tensor,
     lb_curr: torch.Tensor,
     ub_curr: torch.Tensor,
-    lower_b: list[int],
-    lower_i: list[int],
-    upper_b: list[int],
-    upper_i: list[int],
+    batches: list[tuple[int, torch.LongTensor, torch.LongTensor]],
+    sparse_c: bool = False,
     debug: bool = IS_TEST_OR_DEBUG,
-):
+) -> bool:
     """Tighten the bounds of a previous layer (batched).
 
     Args:
@@ -178,13 +229,12 @@ def tighten_bounds_back(
         ub_prev: Previous layer's upper bounds.
         lb_curr: Current layer's lower bounds.
         ub_curr: Current layer's upper bounds.
-        lower_b: Batch indices of lower bound updates.
-        lower_i: Indices of lower bound updates.
-        upper_b: Batch indices of upper bound updates.
-        upper_i: Indices of upper bound updates.
+        batches: List of neurons with new bounds: `(batch_index, active_indices, inactive_indices)`.
+        sparse_c: The linear models only have outputs for the indices in the batches.
         debug: Activate additional asserts. Defaults to False unless debugging.
     """
-    eps = torch.finfo(lA.dtype).eps * 3
+    eps = torch.finfo(lA.dtype).eps * 2
+    epsl = torch.finfo(lA.dtype).eps ** 0.5
     center = (ub_prev + lb_prev) / 2.0
     diff = (ub_prev - lb_prev) / 2.0
     flat1 = (ub_curr.shape[0], -1)
@@ -206,33 +256,45 @@ def tighten_bounds_back(
     # Note the worst case assumption 'uA @ x + ubias >= l' and 'lA @ x + lbias <= u'.
     # We calculate the bounds individually for each variable, but in parallel using vectorization.
 
-    if len(lower_b) > 0:
-        A = uA[lower_b, lower_i] if uA.shape[1] > 1 else uA[lower_b, 0]
-        bias = ubias[lower_b, lower_i] if ubias.shape[1] > 1 else ubias[lower_b, 0]
-        ci = A * center[lower_b] + A.abs() * diff[lower_b]
-        c = ci.flatten(1).sum(1)
-        ln = ((lb_curr[lower_b, lower_i] - bias - c).reshape(flat2) + ci) / A
-        lb_new = torch.where((A > eps), ln, lb_prev[lower_b])
-        ub_new = torch.where((A < -eps), ln, ub_prev[lower_b])
-        if debug:
-            assert (lb_new <= ub_prev[lower_b] + eps).all().cpu().item()
-            assert (ub_new >= lb_prev[lower_b] - eps).all().cpu().item()
-        lb_prev[lower_b] = torch.maximum(lb_new, lb_prev[lower_b])
-        ub_prev[lower_b] = torch.minimum(ub_new, ub_prev[lower_b])
+    tighter = False
+    for b, active, inactive in batches:
+        na, ni = len(active), len(inactive)
+        if na > 0:
+            A = uA[b, :na] if sparse_c else uA[b, active]
+            bias = ubias[b, :na] if sparse_c else ubias[b, active]
+            ci = A * center[b, None] + A.abs() * diff[b, None]
+            c = ci.flatten(1).sum(1)
+            ln = ((lb_curr[b, active] - bias - c).reshape(flat2) + ci) / A
+            lb_new = torch.where((A > epsl), ln, lb_prev[b, None]).max(0)[0]
+            ub_new = torch.where((A < -epsl), ln, ub_prev[b, None]).min(0)[0]
+            if debug:
+                assert (lb_new <= ub_prev[b] + eps).all().cpu().item()
+                assert (ub_new >= lb_prev[b] - eps).all().cpu().item()
+            if torch.any(lb_new > lb_prev[b]).item():
+                tighter = True
+                lb_prev[b] = torch.maximum(lb_new, lb_prev[b])
+            if torch.any(ub_new < ub_prev[b]).item():
+                tighter = True
+                ub_prev[b] = torch.minimum(ub_new, ub_prev[b])
 
-    if len(upper_b) > 0:
-        A = lA[upper_b, upper_i] if lA.shape[1] > 1 else lA[upper_b, 0]
-        bias = lbias[upper_b, upper_i] if lbias.shape[1] > 1 else lbias[upper_b, 0]
-        ci = A * center[upper_b] - A.abs() * diff[upper_b]
-        c = ci.flatten(1).sum(1)
-        un = ((ub_curr[upper_b, upper_i] - bias - c).reshape(flat2) + ci) / A
-        lb_new = torch.where((A < -eps), un, lb_prev[upper_b])
-        ub_new = torch.where((A > eps), un, ub_prev[upper_b])
-        if debug:
-            assert (lb_new <= ub_prev[upper_b] + eps).all().cpu().item()
-            assert (ub_new >= lb_prev[upper_b] - eps).all().cpu().item()
-        lb_prev[upper_b] = torch.maximum(lb_new, lb_prev[upper_b])
-        ub_prev[upper_b] = torch.minimum(ub_new, ub_prev[upper_b])
+        if ni > 0:
+            A = lA[b, na : na + ni] if sparse_c else lA[b, inactive]
+            bias = lbias[b, na : na + ni] if sparse_c else lbias[b, inactive]
+            ci = A * center[b, None] - A.abs() * diff[b, None]
+            c = ci.flatten(1).sum(1)
+            un = ((ub_curr[b, inactive] - bias - c).reshape(flat2) + ci) / A
+            lb_new = torch.where((A < -epsl), un, lb_prev[b, None]).max(0)[0]
+            ub_new = torch.where((A > epsl), un, ub_prev[b, None]).min(0)[0]
+            if debug:
+                assert (lb_new <= ub_prev[b] + eps).all().cpu().item()
+                assert (ub_new >= lb_prev[b] - eps).all().cpu().item()
+            if torch.any(lb_new > lb_prev[b]).item():
+                tighter = True
+                lb_prev[b] = torch.maximum(lb_new, lb_prev[b])
+            if torch.any(ub_new < ub_prev[b]).item():
+                tighter = True
+                ub_prev[b] = torch.minimum(ub_new, ub_prev[b])
+    return tighter
 
 
 def tighten_backwards(
@@ -241,7 +303,7 @@ def tighten_backwards(
     lower: torch.Tensor,
     upper: torch.Tensor,
     debug: bool = IS_TEST_OR_DEBUG,
-):
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Thigten bounds of a previous layer (batched).
 
     Args:
@@ -265,5 +327,4 @@ def tighten_backwards(
     if debug:
         assert (lb_new <= upper + eps).all().cpu().item()
         assert (ub_new >= lower - eps).all().cpu().item()
-    lower[:] = torch.maximum(lb_new, lower)
-    upper[:] = torch.minimum(ub_new, upper)
+    return torch.maximum(lb_new, lower), torch.minimum(ub_new, upper)

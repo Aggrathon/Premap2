@@ -1,11 +1,13 @@
 import copy
+from itertools import repeat
 
 import numpy as np
 import torch
 
 from auto_LiRPA.bound_general import BoundedTensor, PerturbationLpNorm
 from premap2.sampling import Samples
-from premap2.tighten_bounds import tighten_bounds
+from premap2.tighten_bounds import NewBounds, tighten_bounds
+from premap2.utils import IS_TEST_OR_DEBUG, assert_bounds, assert_contains_his
 
 try:
     from premap.branching_domains import ReLUDomain, SortedReLUDomainList
@@ -83,14 +85,14 @@ def calc_priority(
     balance_coef: float = 0.0,
     soft_coef: float = 0.0,
     lower_coef: float = 0.0,
+    gap_coef: float = 0.25,
     width_coef: float = 0.0,
     loose_coef: float = 0.0,
     bound_coef: float = 0.0,
-    gap_coef: float = 0.0,
-    area_coef: float = 1.0,
-    under_coef: float = 0.75,
+    area_coef: float = 0.75,
+    under_coef: float = 0.5,
     extra_coef: float = 1.0,
-    stable_coef: float = 0.0,
+    stable_coef: float = 1.0,
     pure_coef: float = 0.0,
 ) -> list[torch.Tensor]:
     """Calculate priorities for the neurons.
@@ -290,45 +292,128 @@ def split_node_batch(
         samples: Split and filtered `samples`.
         branching_decision: Filtered `branching_decision`.
     """
-
-    def remove_domain(index: int, add: bool = True):
-        # Shortcut branches that don't need exploring
-        nonlocal cs, rhs
-        batch = len(samples)
-        domain = selected_domains.pop(index)
-        if add:
-            domain.samples = samples[index]
+    to_remove = []
+    split_str = ""
+    left_history = []
+    right_history = []
+    left_samples = []
+    right_samples = []
+    for i, (domain, sample, (layer, index)) in enumerate(
+        zip(selected_domains, samples, branching_decision)
+    ):
+        # Check for fully explored branches (priority of branching decision < 0)
+        if sample.priority[layer].view(-1)[index].cpu().item() < 0:
+            domain.priority = -np.inf
             domains.add_domain(domain)
+            to_remove.append(i)
+        else:  # Check for shortcuts (domains where we don't need further processing after a split)
+            s1, s2 = sample.split(layer, index)
+            len1 = len(s1)
+            len2 = len(s2)
+            split_str += f"({layer}, {index}: {len1} | {len2}) "
+
+            if len1 == 0:
+                to_remove.append(i)
+                d1, d2 = _split_domain(domain, s1, s2, layer, index, under, skip1=under)
+                domains.add_domain(d2)
+                if not under:  # Save domain not guaranteed to be outside preimage
+                    d1.priority = -np.inf
+                    domains.add_domain(d1)
+                continue
+            elif len2 == 0:
+                to_remove.append(i)
+                d1, d2 = _split_domain(domain, s1, s2, layer, index, under, skip2=under)
+                domains.add_domain(d1)
+                if not under:  # Save domain not guaranteed to be outside preimage
+                    d2.priority = -np.inf
+                    domains.add_domain(d2)
+                continue
+
+            preimg1 = torch.einsum("o...,n...->no", cs[i], s1.y) >= 0
+            preimg1 = preimg1.all(-1).count_nonzero().item()
+            preimg2 = torch.einsum("o...,n...->no", cs[i], s2.y) >= 0
+            preimg2 = preimg2.all(-1).count_nonzero().item()
+            A, b = domain.preimg_A, domain.preimg_b
+            approx1 = torch.einsum("o...,n...->no", A, s1.X) + b.view(1, -1) >= 0
+            approx1 = approx1.all(-1).count_nonzero().item()
+            approx2 = torch.einsum("o...,n...->no", A, s2.X) + b.view(1, -1) >= 0
+            approx2 = approx2.all(-1).count_nonzero().item()
+
+            if preimg1 == 0 if under else preimg1 == len1:
+                to_remove.append(i)
+                d1, d2 = _split_domain(domain, s1, s2, layer, index, under, skip1=under)
+                d2.preimg_vol = preimg2 / len2 * d2.volume
+                d2.approx_vol = approx2 / len2 * d2.volume
+                d2.priority = abs(d2.preimg_vol - d2.approx_vol)
+                domains.add_domain(d2)
+                if not under:  # Save domain with full preimage
+                    d1.preimg_vol = d1.approx_vol = d1.volume
+                    d1.priority = -np.inf
+                    domains.add_domain(d1)
+                continue
+            elif preimg2 == 0 if under else preimg2 == len2:
+                to_remove.append(i)
+                d1, d2 = _split_domain(domain, s1, s2, layer, index, under, skip2=under)
+                d1.preimg_vol = preimg1 / len1 * d1.volume
+                d1.approx_vol = approx1 / len1 * d1.volume
+                d1.priority = abs(d1.preimg_vol - d1.approx_vol)
+                domains.add_domain(d1)
+                if not under:  # Save domain with full preimage
+                    d2.preimg_vol = d2.approx_vol = d2.volume
+                    d2.priority = -np.inf
+                    domains.add_domain(d2)
+                continue
+
+            if approx1 == preimg1 if under else approx1 == 0:
+                to_remove.append(i)
+                d1, d2 = _split_domain(domain, s1, s2, layer, index, under)
+                d1.approx_vol = d1.preimg_vol = preimg1 / len1 * d1.volume
+                d1.priority = -np.inf
+                domains.add_domain(d1)
+                d2.approx_vol = approx2 / len2 * d2.volume
+                d2.preimg_vol = preimg2 / len2 * d2.volume
+                d2.priority = abs(d2.preimg_vol - d2.approx_vol)
+                domains.add_domain(d2)
+            elif approx2 == preimg2 if under else approx2 == 0:
+                to_remove.append(i)
+                d1, d2 = _split_domain(domain, s1, s2, layer, index, under)
+                d2.approx_vol = d2.preimg_vol = preimg2 / len2 * d2.volume
+                d2.priority = -np.inf
+                domains.add_domain(d2)
+                d1.approx_vol = approx1 / len1 * d1.volume
+                d1.preimg_vol = preimg1 / len1 * d1.volume
+                d1.priority = abs(d1.preimg_vol - d1.approx_vol)
+                domains.add_domain(d1)
+            else:
+                h1, h2 = _split_history(domain.history, layer, index)
+                left_history.append(h1)
+                left_samples.append(s1)
+                right_history.append(h2)
+                right_samples.append(s2)
+
+    if len(split_str) > 101:
+        split_str = split_str[:97] + "..."
+    print("Splits decision:", split_str[:100])
+
+    for index in reversed(to_remove):
+        domain = selected_domains.pop(index)
         for lst in (samples, history, branching_decision, betas, intermediate_betas):
             lst.pop(index)
         for lst in (orig_lbs, orig_ubs):
             for i, v in enumerate(lst):
-                if len(v) == batch * 2:
-                    v = (
-                        v[:index],
-                        v[index + 1 : batch + index],
-                        v[batch + index + 1 :],
-                    )
-                    lst[i] = torch.cat(v)
-                else:
-                    lst[i] = torch.cat((v[:index], v[index + 1 :]))
+                lst[i] = torch.cat((v[:index], v[index + 1 :]))
         cs = torch.cat((cs[:index], cs[index + 1 :]))
         rhs = torch.cat((rhs[:index], rhs[index + 1 :]))
         for k1, v1 in slopes.items():
             for k2, v2 in v1.items():
                 slopes[k1][k2] = torch.cat((v2[:, :, :index], v2[:, :, index + 1 :]), 2)
 
-    b = 0
-    # Check for fully explored branches (priority of branching decision < 0)
-    while b < len(branching_decision):
-        layer, index = branching_decision[b]
-        if samples[b].priority[layer].view(-1)[index].cpu().item() < 0:
-            selected_domains[b].priority = -np.inf
-            remove_domain(b)
-        else:
-            b += 1
+    samples = left_samples + right_samples
+    if debug:
+        assert all(len(s) > 0 for s in samples)
+        for hist, sample in zip(left_history + right_history, samples):
+            assert_contains_his(sample.activations, hist)
 
-    samples = [s.split(lay, ind) for s, (lay, ind) in zip(samples, branching_decision)]
     # Tighten the bounds for the splits
     if len(samples) > 0:
         with torch.no_grad():
@@ -341,105 +426,13 @@ def split_node_batch(
                 history=history,
                 cs=cs,
                 threshold=rhs,
-                samples=[s[i] for i in range(2) for s in samples],
+                samples=samples,
                 splits=branching_decision,
                 split_only=not tighten,
                 debug=debug,
             )
-
-        split_str = " ".join(str(b) for b in branching_decision)
-        if len(split_str) > 100:
-            split_str = split_str[:97] + "..."
-        print("Splits decision:", split_str)
-    if debug:
-        assert all((ub >= lb).all().cpu().item() for lb, ub in zip(orig_lbs, orig_ubs))
-
-    # Check and shortcut one-sided splits
-    def readd_domain(b: int, above: bool = True, final: bool = False):
-        s1, s2 = samples[b]
-        domain = selected_domains[b]
-        layer, index = branching_decision[b]
-        if final:
-            domain = copy.copy(domain)
-            domain.priority = -np.nan
-        domain.valid = True
-        domain.history = copy.copy(domain.history)
-        hist_ind, hist_sign = domain.history[layer]
-        if above:
-            domain.samples = s1
-            domain.history[layer] = (hist_ind + [index], hist_sign + [+1.0])
-            domain.lower_all = [lb[None, b] for lb in orig_lbs]
-            domain.upper_all = [ub[None, b] for ub in orig_ubs]
-            domain.volume = domain.volume * (len(s1) / (len(s1) + len(s2)))
-            domains.add_domain(domain)
-        else:
-            domain.samples = s2
-            domain.history[layer] = (hist_ind + [index], hist_sign + [-1.0])
-            domain.lower_all = [lb[None, b + len(samples)] for lb in orig_lbs]
-            domain.upper_all = [ub[None, b + len(samples)] for ub in orig_ubs]
-            domain.volume = domain.volume * (len(s2) / (len(s1) + len(s2)))
-            domains.add_domain(domain)
-
-    b = 0
-    split_str = ""
-    pruned = False
-    while b < len(samples):
-        s1, s2 = samples[b]
-        len1 = len(s1)
-        len2 = len(s2)
-        split_str += f"({len1} | {len2}) "
-        remove1 = len1 == 0
-        remove2 = len2 == 0
-        # NOTE: An empty mask means either an invalid domain or extremely tiny volume.
-        # In case of invalid domain, pruning is the correct course of action.
-        # In case of tiny volume, ideally we should try more samples.
-        # However, that might be difficult and might not change the result in any meaningful way.
-        if under and not remove1 and not remove2:
-            preimg1 = (torch.einsum("o...,n...->no", cs[b], s1.y) >= 0).all(-1)
-            preimg1 = preimg1.count_nonzero().cpu().item()
-            preimg2 = (torch.einsum("o...,n...->no", cs[b], s2.y) >= 0).all(-1)
-            preimg2 = preimg2.count_nonzero().cpu().item()
-            remove1 = preimg1 == 0
-            remove2 = preimg2 == 0
-        if remove1 or remove2:
-            if not remove1:
-                readd_domain(b, True, False)
-            if not remove2:
-                readd_domain(b, False, False)
-            remove_domain(b, False)
-            pruned = True
-        else:
-            b += 1
-    if len(split_str) > 101:
-        print("Splits preimage:", split_str[:97] + "...")
-    elif len(split_str) > 0:
-        print("Splits preimage:", split_str[:100])
-    if pruned:
-        print("Shortcut subdomains without preimage samples.")
-    samples = [s[i] for i in range(2) for s in samples]
-    if debug:
-        assert all(len(s) > 0 for s in samples)
-
-    # Create histories for the splits
-    left_history = []
-    right_history = []
-    for hist, (layer, index) in zip(history, branching_decision):
-        left = copy.copy(hist)
-        left[layer] = (left[layer][0] + [index], left[layer][1] + [+1.0])
-        left_history.append(left)
-        right = copy.copy(hist)
-        right[layer] = (right[layer][0] + [index], right[layer][1] + [-1.0])
-        right_history.append(right)
-
-    if debug:
-        for hist, sample in zip(left_history + right_history, samples):
-            for (i, s), a in zip(hist, sample.activations):
-                if i:
-                    a = a.flatten(1)[:, i] >= 0
-                    s = torch.tensor([s], device=a.device) >= 0
-                    assert (a == s).all().cpu().item()
-    if len(samples) > 0:
         net.x = _make_bounded_tensor(net.x, samples)
+
     return (
         orig_lbs,
         orig_ubs,
@@ -454,6 +447,66 @@ def split_node_batch(
         samples,
         branching_decision,
     )
+
+
+def _split_history(
+    history: list[tuple[list[int], list[float]]], layer: int, index: int
+) -> tuple[list[tuple[list[int], list[float]]], list[tuple[list[int], list[float]]]]:
+    history1 = copy.copy(history)
+    history2 = copy.copy(history)
+    hist_ind, hist_sign = history[layer]
+    history1[layer] = (hist_ind + [index], hist_sign + [+1.0])
+    history2[layer] = (hist_ind + [index], hist_sign + [-1.0])
+    return history1, history2
+
+
+@torch.no_grad()
+def _split_domain(
+    domain: "ReLUDomain",
+    samples1: Samples,
+    samples2: Samples,
+    layer: int,
+    index: int,
+    under: bool,
+    skip1: bool = False,
+    skip2: bool = False,
+) -> tuple["ReLUDomain", "ReLUDomain"]:
+    if skip1:
+        domain_above = None
+        domain_below = domain
+    elif skip2:
+        domain_above = domain
+        domain_below = None
+    else:
+        domain_above = copy.copy(domain)
+        domain_below = domain
+    num = len(samples1) + len(samples2)
+    for domain, sign, samples in (
+        (domain_above, +1.0, samples1),
+        (domain_below, -1.0, samples2),
+    ):
+        if domain is None:
+            continue
+        domain.valid = True
+        domain.history = copy.copy(domain.history)
+        hist_ind, hist_sign = domain.history[layer]
+        domain.history[layer] = (hist_ind + [index], hist_sign + [sign])
+        domain.samples = samples
+        if len(domain.samples) != num:
+            scale = len(domain.samples) / num
+            domain.volume *= scale
+            domain.preimg_vol *= scale
+            domain.approx_vol = 0.0 if under else domain.volume
+        domain.samples.stabilize(layer, index, sign > 0)
+        if sign > 0:
+            domain.lower_all = copy.copy(domain.lower_all)
+            domain.lower_all[layer] = domain.lower_all[layer].clone()
+            domain.lower_all[layer].view(-1)[index] = 0.0
+        else:
+            domain.upper_all = copy.copy(domain.upper_all)
+            domain.upper_all[layer] = domain.upper_all[layer].clone()
+            domain.upper_all[layer].view(-1)[index] = 0.0
+    return domain_above, domain_below
 
 
 def get_updated_bounds(
@@ -475,7 +528,6 @@ def get_updated_bounds(
 
     Args:
         net: Alpha beta CROWN model.
-        domain: The domain to split.
         lower_all: Lower bounds for the pre-relu layers and the output.
         upper_all: Upper bounds for the pre-relu layers and the output.
         alphas: Alphas of the CROWN bounds.
@@ -500,10 +552,24 @@ def get_updated_bounds(
         upper_all[l].view(len(samples), -1)[j + len(splits), i] = 0.0
     if split_only:
         return lower_all, upper_all
-    split_dict = {
-        "decision": [[bd] for bd in splits],
-        "coeffs": [[1.0] for i in range(len(splits))],
-    }
+    nb = NewBounds()
+    for batch, (layer, index) in enumerate(splits):
+        nb.add_split(layer, batch, index, len(samples))
+    count = 0
+    for batch, sample in enumerate(samples):
+        for (layer, active), index in sample.stabilized.items():
+            count += index.numel()
+            if active:
+                nb.add_active(layer, batch, index)
+            else:
+                nb.add_inactive(layer, batch, index)
+    if count < len(samples) + 2:
+        # NOTE: Tightening bounds is mostly useful for branches with future splits.
+        # This is a really cheap count that skips alot of leaf branches.
+        # (Non-leaf branches will accumulate splits until this exit is bypassed.)
+        return lower_all, upper_all
+    for sample in samples:
+        sample.stabilized.clear()
     lower = torch.cat([s.lower for s in samples])
     upper = torch.cat([s.upper for s in samples])
     net.x = _make_bounded_tensor(net.x, samples, lower, upper)
@@ -512,7 +578,7 @@ def get_updated_bounds(
     net.update_bounds_parallel(
         pre_lb_all=lower_all,
         pre_ub_all=upper_all,
-        split=split_dict,
+        split=splits,
         slopes=alphas,
         betas=betas,
         history=history,
@@ -530,39 +596,24 @@ def get_updated_bounds(
         for k in r.inputs
     }
     bounds[net.net.input_name[0]] = (lower, upper)
-    splits2 = [(i, [], [], [], []) for i in range(len(net.net.relus))]
-    for batch, (layer, index) in enumerate(splits):
-        splits2[layer][1].append(batch)
-        splits2[layer][2].append(index)
-        splits2[layer][3].append(batch + len(splits))
-        splits2[layer][4].append(index)
-    splits2 = [s for s in splits2 if len(s[1]) + len(s[3]) > 0]
-    bounds = tighten_bounds(net.net, net.x, bounds, splits2)
+    bounds = tighten_bounds(net.net, net.x, bounds, nb)
     del bounds[net.net.input_name[0]]
     for lb, ub, s in zip(lower, upper, samples):
         s.lower = lb[None]
         s.upper = ub[None]
         if debug:
-            assert (s.X >= s.lower).all().cpu().item()
-            assert (s.X <= s.upper).all().cpu().item()
+            eps = torch.finfo(s.X.dtype).eps * 2
+            assert (s.X >= s.lower - eps).all().cpu().item()
+            assert (s.X <= s.upper + eps).all().cpu().item()
     lower_all = [l for (l, _) in bounds.values()] + [lower_all[-1]]
     upper_all = [u for (_, u) in bounds.values()] + [upper_all[-1]]
-    # if debug:
-    eps = torch.finfo(lower_all[0].dtype).eps * 3
-    for i, (lbo, ubo) in enumerate(zip(lower_all[:-1], upper_all)):
-        for j, s in enumerate(samples):
-            if s.activations[i].shape[0] > 0:
-                # These asserts might fail due to `tighten_bounds_forward`, which is just a wrapper around `lirpa.compute_bounds`.
-                # (The asserts succeed if inserted just before and only disabling `tighten_bounds_forward` avoids this issue).
-                # I don't understand how LiRPA could fail (only observed with the CNN).
-                # assert (s.activations[i] >= lbo[None, j] - eps).all().cpu().item()
-                # assert (s.activations[i] <= ubo[None, j] + eps).all().cpu().item()
-                # These where:s should in theory not do anything, see above.
-                amax = s.activations[i].max(0)[0]
-                ubo[j] = torch.where(amax > ubo[j], amax + eps, ubo[j])
-                amin = s.activations[i].min(0)[0]
-                lbo[j] = torch.where(amin < lbo[j], amin - eps, lbo[j])
-
+    if debug:
+        assert all(
+            (ub >= lb).all().cpu().item() for lb, ub in zip(lower_all, upper_all)
+        )
+        for i, (lbo, ubo) in enumerate(zip(lower_all[:-1], upper_all)):
+            for j, s in enumerate(samples):
+                assert_bounds(s.activations[i], lbo[None, j], ubo[None, j])
     return lower_all, upper_all
 
 
@@ -582,3 +633,95 @@ def _make_bounded_tensor(
     else:
         data = x.data[: len(samples)]
     return BoundedTensor(data, ptb)
+
+
+@torch.no_grad()
+def stabilize_on_samples(
+    samples: list[Samples],
+    history: list[list[tuple[list[int], list[float]]]],
+    lower: list[torch.Tensor],
+    upper: list[torch.Tensor],
+    domains: list["ReLUDomain"] | None = None,
+    domain_list: "SortedReLUDomainList | None" = None,
+    store_splits: bool = False,
+    readd_splits: bool = False,
+    debug: bool = IS_TEST_OR_DEBUG,
+):
+    """Stabilize unstable intermediate bounds if no sample crosses zero.
+    This is an optimization for under approximation since it won't break the under-approximation properties.
+    However, this might reduce the search space by discarding both impossible and rare subdomains.
+
+    Args:
+        samples: Batch of `Samples`.
+        history: History that will be modified in-place.
+        lower: Lower bounds.
+        upper: Upper bounds.
+        store_splits: Store the stabilized bounds in `samples`. Defaults to False.
+        debug: Run additional asserts. Defaults to IS_TEST_OR_DEBUG.
+    """
+    for i, lb in enumerate(lower):
+        lower[i] = lb.contiguous()
+    for i, ub in enumerate(upper):
+        upper[i] = ub.contiguous()
+    assert not readd_splits or (domains is not None and domain_list is not None)
+    for i, (s, d, his) in enumerate(
+        zip(samples, domains if domains else repeat(None), history)
+    ):
+        assert (acts := s.activations) is not None
+        for layer, (act, (ind, sgn), lb, ub) in enumerate(zip(acts, his, lower, upper)):
+            lbz = (act.min(0, True)[0] >= 0.0) & (lb[i] < 0.0)
+            ubz = (act.max(0, True)[0] <= 0.0) & (ub[i] > 0.0)
+            lbz = torch.nonzero(lbz.view(-1)).detach()
+            ubz = torch.nonzero(ubz.view(-1)).detach()
+            if lbz.numel() == 0 and ubz.numel() == 0:
+                continue
+            if lbz.numel() > 0:
+                lb[i].view(-1)[lbz] = 0.0
+                sgn = sgn + [1.0] * lbz.numel()
+                ind = ind + lbz.view(-1).tolist()
+                if store_splits:
+                    s.stabilize(layer, lbz.view(-1).cpu(), True)
+                if readd_splits:
+                    _add_stabilized(domain_list, d, layer, lbz, True)
+            if ubz.numel() > 0:
+                ub[i].view(-1)[ubz] = 0.0
+                sgn = sgn + [-1.0] * ubz.numel()
+                ind = ind + ubz.view(-1).tolist()
+                if store_splits:
+                    s.stabilize(layer, ubz.view(-1).cpu(), False)
+                if readd_splits:
+                    _add_stabilized(domain_list, d, layer, ubz, False)
+            history[i][layer] = (ind, sgn)
+        if debug:
+            assert_contains_his(
+                acts, his, (l[None, i] for l in lower), (u[None, i] for u in upper)
+            )
+        # Update domain in case of later shortcut
+        if d is not None:
+            d.history = history[i]
+            d.samples = s
+            d.lower_all = [lb[i, None] for lb in lower]
+            d.upper_all = [ub[i, None] for ub in upper]
+
+
+def _add_stabilized(
+    domains: "SortedReLUDomainList",
+    domain: "ReLUDomain",
+    layer: int,
+    index: torch.LongTensor,
+    above: bool,
+):
+    domain.history = copy.copy(domain.history)
+    his_ind, his_sgn = (copy.copy(l) for l in domain.history[layer])
+    domain.history[layer] = (his_ind, his_sgn)
+    for i in index.ravel().detach().cpu().numpy():
+        domain2 = copy.copy(domain)
+        domain2.history = copy.copy(domain.history)
+        domain2.history[layer] = (his_ind + [i], his_sgn + [-1.0 if above else +1.0])
+        domain2.volume = 0.0
+        domain2.preimg_vol = 0.0
+        domain2.approx_vol = 0.0
+        domain2.priority = -np.inf
+        domains.add_domain(domain2)
+        his_ind.append(i)
+        his_sgn.append(+1.0 if above else -1.0)
