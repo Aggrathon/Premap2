@@ -6,4 +6,5 @@ from .splitting import (  # noqa: F401
     split_node_batch,
     stabilize_on_samples,
 )
+from .utils import result_contains  # noqa: F401
 from .wrapper import premap as premap

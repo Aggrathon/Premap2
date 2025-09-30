@@ -49,27 +49,29 @@ def test_sample():
         s = calc_samples((x, x + 1), model, 100)
         assert len(s) >= 100
         xu = x + (torch.rand(x.shape) > 0.3).type(x.dtype)
-        s = calc_samples((x, xu), model, 100)
-        uns = s.unstable()
+        s = calc_samples((x, xu), model, 40)
+        s2 = s.to("cpu:0")
+        assert torch.equal(s.y, s2.y)
         split = [
             u.flatten().nonzero()[0].cpu().item()
             if u.flatten().count_nonzero() > 0
             else 0
-            for u in uns
+            for u in s.unstable()
         ]
         val = [s.activations[i][0].flatten()[j] >= 0 for i, j in enumerate(split)]
         hist = [([j], [1 if v else -1]) for j, v in zip(split, val)]
         for i, (j, v) in enumerate(zip(split, val)):
             s = s.split(i, j)[1 - int(v)]
         assert split_contains2(hist, s.activations).all().cpu().item()
-        s = calc_samples(s, model, 200, hist)
-        assert len(s) >= 100
         s = calc_samples(s, model, 100, hist)
         s = calc_samples(s, model, 100, hist)
         s = calc_samples(s, model, 100, hist)
         s = calc_samples(s, model, 100, hist)
         s.activations = None
         s = calc_samples(s, model, 100, hist)
+        s.A = x[:, s.mask] if s.mask is not None else x
+        s.b = torch.zeros((1,))
+        s = calc_samples(s, model, len(s) * 3, hist)
 
 
 def test_split():

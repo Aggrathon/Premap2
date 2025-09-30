@@ -2,6 +2,7 @@ import numbers
 import sys
 from itertools import repeat
 from pathlib import Path
+from typing import IO, Any
 
 import numpy as np
 import torch
@@ -176,7 +177,7 @@ def assert_bounds(
         assert (X > lower - epsilon).all()
         assert (X < upper + epsilon).all()
     else:
-        for x, lb, ub in zip(X, lower, upper):
+        for x, lb, ub in zip(X, lower, upper):  # type: ignore
             assert_bounds(x, lb, ub, epsilon)
 
 
@@ -187,11 +188,12 @@ def assert_contains_hii(
     upper: list[torch.Tensor] | None = None,
     epsilon: float | None = None,
 ):
-    if lower is None:
-        lower = repeat(None)  # type: ignore
-    if upper is None:
-        upper = repeat(None)  # type: ignore
-    for act, (below, above), lb, ub in zip(activations, history, lower, upper):
+    for act, (below, above), lb, ub in zip(
+        activations,
+        history,
+        lower if lower else repeat(None),
+        upper if upper else repeat(None),
+    ):
         # Large GMMs are non-deterministic, so we need a suprisingly large epsilon
         eps = torch.finfo(act.dtype).eps ** 0.5 * 0.5 if epsilon is None else epsilon
         if lb is not None:
@@ -214,14 +216,27 @@ def assert_contains_his(
     assert_contains_hii(activations, history_to_index(history), lower, upper, epsilon)
 
 
-def results_contains(
-    X: torch.Tensor, results: Path | dict[str, object], model: torch.nn.Module, **kwargs
+def result_contains(
+    X: torch.Tensor,
+    result: Path | IO[Any] | dict[str, object],
+    model: torch.nn.Module,
+    **kwargs,
 ) -> torch.Tensor:
+    """Check which items are inside a finished preimage approximation.
+
+    Args:
+        X: Items.
+        result: PREMAP result (file or already loaded dictionary).
+        model: Prediction function/model.
+
+    Returns:
+        Boolean vector.
+    """
     _, activations = WithActivations(model)(X)
-    if not isinstance(results, dict):
-        results = torch.load(results, **kwargs)
+    if not isinstance(result, dict):
+        result = torch.load(result, **kwargs)
     contains = torch.zeros(X.shape[0], dtype=torch.bool)
-    for A, b, _, _, hist in results["domains"]:  # type: ignore
+    for A, b, _, _, hist in result["domains"]:  # type: ignore
         contp = polytope_contains(X, A, b)
         if isinstance(contp, slice):
             conts = split_contains(history_to_index(hist), activations)

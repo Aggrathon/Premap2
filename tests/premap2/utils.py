@@ -1,3 +1,5 @@
+import random
+
 import numpy as np
 import torch
 
@@ -47,3 +49,21 @@ def get_intermediate_bounds(
         upper = node.upper.detach().clone() if node.upper is not None else None
         bounds[node.name] = (lower, upper)
     return bounds
+
+
+class temp_seed:
+    def __init__(self, seed: int):
+        self.seed = seed
+
+    def __enter__(self):
+        self.rng_state = torch.get_rng_state()
+        self.rnd_state = random.getstate()
+        self.rnp_state = np.random.get_state()
+        torch.manual_seed(self.seed)
+        random.seed(self.seed)
+        np.random.seed(self.seed)
+
+    def __exit__(self, *_):
+        torch.set_rng_state(self.rng_state)
+        random.setstate(self.rnd_state)
+        np.random.set_state(self.rnp_state)

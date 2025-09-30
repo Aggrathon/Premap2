@@ -648,15 +648,17 @@ def stabilize_on_samples(
     debug: bool = IS_TEST_OR_DEBUG,
 ):
     """Stabilize unstable intermediate bounds if no sample crosses zero.
-    This is an optimization for under approximation since it won't break the under-approximation properties.
-    However, this might reduce the search space by discarding both impossible and rare subdomains.
+    This reduces the search space by adding constraints that avoid both impossible and rare subdomains.
 
     Args:
         samples: Batch of `Samples`.
         history: History that will be modified in-place.
         lower: Lower bounds.
         upper: Upper bounds.
-        store_splits: Store the stabilized bounds in `samples`. Defaults to False.
+        domains: Batch of `ReLUDomain`.
+        domain_list: Domains not in the batch.
+        store_splits: Store the stabilized bounds in `Samples.stabilized`.
+        readd_splits: Create domains for empty branches. Set to `True` when doing over-approximations.
         debug: Run additional asserts. Defaults to IS_TEST_OR_DEBUG.
     """
     for i, lb in enumerate(lower):

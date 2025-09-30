@@ -55,7 +55,10 @@ source = ["src/premap2/"]
 
 [tool.coverage.report]
 exclude_also = [
-    "print",
+    "print\\(",
     "plt.show",
     "ImportError",
+    "torch.cuda",
+    "if debug:",
+    "@torch.jit.script"
 ]
