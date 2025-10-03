@@ -702,8 +702,8 @@ class LiRPAConvNet:
                 # We save the batch, and neuron number for each split, and will set all corresponding elements in batch.
                 zero_indices_batch[d].append(i)
                 zero_indices_neuron[d].append(idx)
-            zero_indices_batch = [torch.as_tensor(t).to(device=self.net.device, non_blocking=True) for t in zero_indices_batch]
-            zero_indices_neuron = [torch.as_tensor(t).to(device=self.net.device, non_blocking=True) for t in zero_indices_neuron]
+            zero_indices_batch = [torch.as_tensor(t, dtype=torch.long).to(device=self.net.device, non_blocking=True) for t in zero_indices_batch]
+            zero_indices_neuron = [torch.as_tensor(t, dtype=torch.long).to(device=self.net.device, non_blocking=True) for t in zero_indices_neuron]
 
             # 2 * batch + diving_batch
             upper_bounds = [i if i.shape[0] == 2 * batch + diving_batch else torch.cat([i[:batch], i[:batch], i[batch:]], dim=0) for i in pre_ub_all[:-1]]
