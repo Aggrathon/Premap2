@@ -33,20 +33,20 @@ def test_calc_initial_coverage():
     preimg = (samples.y >= 0).all(1).float().mean().cpu().item()
     cov = (samples.X @ lA.T + lbias[None] >= 0).all(1).float().mean().cpu().item()
     assert preimg >= cov
-    preimage_vol, coverage, _ = calc_initial_coverage(A_b_dict, c, samples, under=True)
+    preimage_vol, approx_vol, _ = calc_initial_coverage(A_b_dict, c, samples, True)
     assert np.allclose(preimage_vol, preimg)
     if preimg > 0:
-        print(preimg, preimage_vol, coverage, cov)
-        assert np.allclose(coverage, cov / preimg)
+        print(preimg, preimage_vol, approx_vol, cov)
+        assert np.allclose(approx_vol, cov)
 
     preimg = (samples.y >= 0).all(1).float().mean().cpu().item()
     cov = (samples.X @ uA.T + ubias[None] >= 0).all(1).float().mean().cpu().item()
     assert cov >= preimg
-    preimage_vol, coverage, _ = calc_initial_coverage(A_b_dict, c, samples, False)
+    preimage_vol, approx_vol, _ = calc_initial_coverage(A_b_dict, c, samples, False)
     assert np.allclose(preimage_vol, preimg)
     if preimg > 0:
-        print(preimg, preimage_vol, coverage, cov)
-        assert np.allclose(coverage, cov / preimg)
+        print(preimg, preimage_vol, approx_vol, cov)
+        assert np.allclose(approx_vol, cov)
 
 
 def test_calc_branched_coverage():
@@ -70,9 +70,9 @@ def test_calc_branched_coverage():
     subdomain_info, _ = calc_branched_coverage(A_b_dict, samples, domains, True)
     for i, (s, info) in enumerate(zip(samples, subdomain_info)):
         A_b_dict = {"": {"": {"lA": lA[i], "lbias": lbias[i]}}}
-        preimage_vol, coverage, _ = calc_initial_coverage(
+        preimage_vol, approx_vol, _ = calc_initial_coverage(
             A_b_dict, torch.ones(1, 1, 1), s
         )
         assert np.allclose(info[0], preimage_vol * 0.5)
-        assert np.allclose(info[1], coverage)
+        assert np.allclose(info[1], approx_vol * 0.5)
         assert np.allclose(info[2], 0.5)

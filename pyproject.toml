@@ -1,6 +1,6 @@
 [project]
 name = "premap2"
-version = "0.1.0"
+version = "0.2.0"
 description = "Preimage approximations for neural networks"
 readme = "README.md"
 authors = [
@@ -31,16 +31,8 @@ onnx2pytorch = { git = "https://github.com/KaidiXu/onnx2pytorch" }
 [dependency-groups]
 dev = [
     "ipython>=8.30.0",
-    "matplotlib>=3.10.0",
     "pytest>=8.3.4",
     "ruff>=0.8.3",
-    "polars>=1.27.1",
-    "pyarrow>=19.0.0",
-    "seaborn>=0.13.0",
-    "scipy>=1.15.0",
-    "scikit-learn>=1.6.0",
-    "jupyter>=1.1.0",
-    "ipywidgets>=8.1.0",
     "pytest-cov>=6.1.1",
 ]
 
@@ -54,6 +46,9 @@ testpaths = ["tests"]
 [tool.ruff]
 extend-exclude = ["src/premap", "src/auto_LiRPA", "PreimageApproxForNNs"]
 
+[tool.ruff.lint]
+ignore = ["E741"]
+
 [tool.coverage.run]
 branch = true
 omit = ["PreimageApproxForNNs/*"]
@@ -63,7 +58,10 @@ source = ["src/premap2/"]
 
 [tool.coverage.report]
 exclude_also = [
-    "print",
+    "print\\(",
     "plt.show",
     "ImportError",
+    "torch.cuda",
+    "if debug:",
+    "@torch.jit.script"
 ]

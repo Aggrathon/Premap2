@@ -2,7 +2,7 @@ import time
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryFile
-from typing import Iterator, Protocol
+from typing import IO, Any, Iterator, Protocol
 
 import numpy as np
 import torch
@@ -16,7 +16,7 @@ class ADomain(Protocol):
     priority: float
     preimg_A: torch.Tensor
     preimg_b: torch.Tensor
-    preimg_cov: float
+    approx_vol: float
     preimg_vol: float
     history: list
 
@@ -57,6 +57,7 @@ class PriorityDomains:
     def __len__(self):
         return len(self._list)
 
+    @torch.no_grad()
     def add(self, domain: ADomain):
         """Add a domain to the list (reducing and storing as needed)."""
         if self._cache is None:
@@ -85,36 +86,42 @@ class PriorityDomains:
 
     def iter_final(self) -> Iterator[ADomain]:
         """Iterate over domains (enforced loading and reducing)."""
-        return (self.reduce(self.load(item)) for item in self._list)
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        return (self.reduce(self.load(item), sync=False) for item in self._list)
 
     def _create_cache(self):
         self._cache = TemporaryFile()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
         for i, item in enumerate(self._list):
             if i >= self.reduce_start:
-                self.reduce(item)
+                self.reduce(item, sync=False)
             if i >= self.store_start or item.priority == -np.inf:
-                self.store(item)
+                self.store(item, sync=False)
 
-    def reduce(self, domain: ADomain) -> ADomain:
+    def reduce(self, domain: ADomain, sync: bool = True) -> ADomain:
         """Remove properties that can be recalculated from a domain."""
         s = domain.samples
         if s is not None and s.priority is not None:
             s.activations = None
             s.priority = None
             if s.mask is not None and s.X.shape[1:] == s.mask.shape:
-                # Using Sample.to(..., non_blocking=True) requires synchronization
-                if torch.cuda.is_available():
-                    torch.cuda.synchronize()
+                if sync:
+                    # Using Sample.to(..., non_blocking=True) requires synchronization
+                    if torch.cuda.is_available():
+                        torch.cuda.synchronize()
                 s.X = s.X[:, s.mask].contiguous()
         return domain
 
-    def store(self, domain: ADomain) -> ADomain:
+    def store(self, domain: ADomain, sync: bool = True) -> ADomain:
         """Store a domain in the disk cache."""
         if self._cache is None or hasattr(domain, "__PriorityDomains_cache"):
             return domain
         start = self._cache.seek(0, 2)
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
+        if sync:
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
         torch.save(domain, self._cache, pickle_protocol=5)
         self._cache.flush()
         for k, v in domain.__dict__.items():
@@ -175,13 +182,13 @@ def _has_tensor(item: object) -> bool:
 def save_premap(
     domains: PriorityDomains | tuple[float, float, dict[str, torch.Tensor]],
     config: dict,
-    dir_path: str | Path,
+    dir_path: str | Path | None = None,
     total_time: float = np.nan,
     success: bool = False,
     times: list[float] | None = None,
     coverages: list[float] | None = None,
     num_domains: list[int] | None = None,
-) -> Path:
+) -> Path | IO[Any]:
     """Save PREMAP results and configuration.
 
     Args:
@@ -198,20 +205,20 @@ def save_premap(
         Path to where the results where saved.
     """
     if isinstance(domains, (list, tuple)):
-        vol, cov, Ab = domains
-        if "lA" in Ab:
-            domains = [(Ab["lA"], Ab["lbias"], vol, cov, [])]
-        else:
-            domains = [(Ab["uA"], Ab["ubias"], vol, cov, [])]
+        pvol, avol, Ab = domains
+        nA, nb = ("lA", "lbias") if "lA" in Ab else ("uA", "ubias")
+        domain_list = [
+            (Ab[nA].detach().cpu(), Ab[nb].detach().ravel().cpu(), pvol, avol, [])
+        ]
     else:
         if not isinstance(domains, PriorityDomains):
             domains = domains.domains
-        domains = [
+        domain_list = [
             (
                 d.preimg_A.detach().cpu(),
-                d.preimg_b.detach().cpu(),
+                d.preimg_b.detach().ravel().cpu(),
                 d.preimg_vol,
-                d.preimg_cov,
+                d.approx_vol,
                 d.history,
             )
             for d in domains.iter_final()
@@ -219,18 +226,30 @@ def save_premap(
     if not isinstance(config["model"]["name"], (str, type(None))):
         cls = type(config["model"]["name"])
         config["model"]["name"] = cls.__qualname__
+    preimage_vol = sum(d[2] for d in domain_list)
+    approx_vol = sum(d[3] for d in domain_list)
     preimage_dict = {
         "config": config,
         "time": total_time,
         "success": success,
-        "domains": domains,
+        "domains": domain_list,
         "times": times,
         "num_domains": num_domains,
         "coverages": coverages,
+        "iterations": len(coverages) if coverages else 0,
+        "preimage_vol": preimage_vol,
+        "approx_vol": approx_vol,
+        "coverage": approx_vol / preimage_vol if preimage_vol > 0.0 else np.nan,
+        "__version__": 250918,
     }
-    dir_path = Path(dir_path)
-    dir_path.mkdir(parents=True, exist_ok=True)
-    path = dir_path / f"premap_{time.strftime('%Y-%m-%d_%H-%M-%S')}.pt"
-    torch.save(preimage_dict, path, pickle_protocol=5)
-    print("PREMAP results saved to:", str(path))
+    if dir_path is None:
+        path = TemporaryFile()
+        torch.save(preimage_dict, path, pickle_protocol=5)
+        path.seek(0)
+    else:
+        dir_path = Path(dir_path)
+        dir_path.mkdir(parents=True, exist_ok=True)
+        path = dir_path / f"premap_{time.strftime('%Y-%m-%d_%H-%M-%S')}.pt"
+        torch.save(preimage_dict, path, pickle_protocol=5)
+        print("PREMAP results saved to:", str(path))
     return path

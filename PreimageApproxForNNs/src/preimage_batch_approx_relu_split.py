@@ -21,12 +21,12 @@ import arguments
 from cut_utils import fetch_cut_from_cplex, generate_cplex_cuts, clean_net_mps_process, cplex_update_general_beta
 
 try:
-    from premap2 import calc_initial_coverage, calc_branched_coverage, calc_samples, calc_constraints, select_node_batch, split_node_batch, save_premap
+    from premap2 import calc_initial_coverage, calc_branched_coverage, calc_samples, calc_constraints, select_node_batch, split_node_batch, save_premap, stabilize_on_samples
 except ImportError:
     import sys
     from pathlib import Path
     sys.path.append(str(Path(__file__).parent.parent.parent / 'src'))
-    from premap2 import calc_initial_coverage, calc_branched_coverage, calc_samples, calc_constraints, select_node_batch, split_node_batch, save_premap
+    from premap2 import calc_initial_coverage, calc_branched_coverage, calc_samples, calc_constraints, select_node_batch, split_node_batch, save_premap, stabilize_on_samples
 
 Visited, Flag_first_split = 0, True
 all_node_split = False
@@ -52,11 +52,12 @@ def batch_verification(num_unstable, d, net, batch, pre_relu_indices, growth_rat
     domains_params = d.pick_out(batch=batch, device=net.x.device)
     # Note that lAs is removed
     mask, orig_lbs, orig_ubs, slopes, betas, intermediate_betas, selected_domains, cs, rhs = domains_params
+    del domains_params  # Allow memory to be freed later
 
     if selected_domains is None:
         total_vol = sum(sd.preimg_vol for sd in d.domains)
-        cov_vol = sum(sd.preimg_vol * sd.preimg_cov for sd in d.domains)
-        return cov_vol / max(1e-8, total_vol), True
+        cov_vol = sum(sd.approx_vol for sd in d.domains)
+        return cov_vol / max(1e-8, total_vol), True, True
     
     batch = len(selected_domains)
     history = [sd.history for sd in selected_domains]
@@ -83,23 +84,16 @@ def batch_verification(num_unstable, d, net, batch, pre_relu_indices, growth_rat
     split_depth = 1
 
     sample_num = arguments.Config["preimage"]["sample_num"]
-    sample_instability = arguments.Config["preimage"]["instability"]
     heuristics = arguments.Config["preimage"]["heuristics"]
     tighten = arguments.Config["preimage"]["tighten_bounds"]
     samples = [calc_samples(domain.samples, net.model_ori, sample_num, domain.history, debug=debug) for domain in selected_domains]
-    if sample_instability:
-        eps = torch.finfo(samples[0].X.dtype).eps * 4
-        for i, (lb, ub) in enumerate(zip(orig_lbs[:-1], orig_ubs)):
-            for j, s in enumerate(samples):
-                amin = s.activations[i].min(0)[0]
-                amax = s.activations[i].max(0)[0]
-                lb[j] = torch.where(lb[j] <= amin, torch.where((lb[j] >= 0.0) | (amin < 0.0), lb[j], -eps), amin - eps)
-                ub[j] = torch.where(ub[j] >= amax, torch.where((ub[j] <= 0.0) | (amax > 0.0), ub[j], +eps), amax + eps)
+    if arguments.Config["preimage"]["instability"]:
+        # Disable the "stable" heuristic since it should be constant 0 after stabilize_on_samples
+        heuristics = ([('stable', 0.0)] + heuristics if heuristics else [('stable', 0.0)])
+        stabilize_on_samples(samples, history, orig_lbs, orig_ubs, selected_domains, d,  store_splits=tighten, readd_splits=bound_upper, debug=debug)
     if debug:
         assert all(len(domain.samples) > 0 for domain in selected_domains)
         assert all(len(s) > 0 for s in samples)
-    for domain in selected_domains:
-        domain.samples = None # Free memory of old samples
 
     # print("batch: ", orig_lbs[0].shape, "pre split depth: ", split_depth)
     # Increase the maximum number of candidates for fsb and kfsb if there are more splits needed.
@@ -138,11 +132,12 @@ def batch_verification(num_unstable, d, net, batch, pre_relu_indices, growth_rat
 
     if len(branching_decision) == 0:
         total_vol = sum(sd.preimg_vol for sd in d.domains)
-        cov_vol = sum(sd.preimg_vol * sd.preimg_cov for sd in d.domains)
+        cov_vol = sum(sd.approx_vol for sd in d.domains)
         total_solve_time += time.time() - solve_time
-        print('Preimage volume:', total_vol)
-        print('Coverage quota:', cov_vol / max(1e-8, total_vol))
-        return cov_vol / max(1e-8, total_vol), len(d) == 0
+        if debug:
+            print('Preimage volume:', total_vol)
+            print('Coverage quota:', cov_vol / max(1e-8, total_vol))
+        return cov_vol / max(1e-8, total_vol), True, len(d) == 0
 
     # if len(sample_left_idx) == 0 and len(sample_right_idx) == 0:
     #     flag_next_split 
@@ -155,7 +150,8 @@ def batch_verification(num_unstable, d, net, batch, pre_relu_indices, growth_rat
                                 stop_func=stop_func(torch.cat([rhs, rhs])), multi_spec_keep_func=multi_spec_keep_func, bound_lower=bound_lower, bound_upper=bound_upper)
 
     dom_ub, dom_lb, dom_ub_point, lAs, A, dom_lb_all, dom_ub_all, slopes, split_history, betas, intermediate_betas, primals, dom_cs = ret
-    calc_constraints(net, samples, left_right_his, dom_lb_all, dom_ub_all, debug=debug)
+    del ret, orig_lbs, orig_ubs
+    calc_constraints(net, samples, dom_lb_all, dom_ub_all, sample_num, debug=debug)
     solve_time = time.time() - solve_time
     total_solve_time += solve_time
     add_time = time.time()
@@ -194,16 +190,12 @@ def batch_verification(num_unstable, d, net, batch, pre_relu_indices, growth_rat
     if bound_upper: 
         d.add(cov_subdomain_info, A_b_dict["uA"], A_b_dict["ubias"], dom_lb, dom_ub, dom_lb_all, dom_ub_all, history, left_right_his, depths, slopes, betas, split_history,
                 branching_decision, rhs, intermediate_betas, check_infeasibility, dom_cs, (2*num_copy)*batch, samples=samples)
+    
     total_vol = 0
     cov_vol = 0
-    
-    # if len(d) < old_d_len:
-    #     print("check why")
-    #     print("should not happen")
-    for i, subdm in enumerate(d.domains):
+    for subdm in d.domains:
         total_vol += subdm.preimg_vol
-        cov_vol += subdm.preimg_vol * subdm.preimg_cov
-        
+        cov_vol += subdm.approx_vol
     total_cov_quota = cov_vol / max(1e-8, total_vol)
     print('length of domains:', len(d))
     print('Preimage volume:', total_vol)
@@ -222,7 +214,7 @@ def batch_verification(num_unstable, d, net, batch, pre_relu_indices, growth_rat
             break
     if split_all:
         print("exhausting search achieved")
-        return total_cov_quota, split_all
+        return total_cov_quota, False, split_all
 
     
 
@@ -272,7 +264,7 @@ def batch_verification(num_unstable, d, net, batch, pre_relu_indices, growth_rat
     #     print(f"Current (lb-rhs): {global_lb.max()}")
 
     print('{} domains visited'.format(Visited))
-    return total_cov_quota, split_all
+    return total_cov_quota, False, split_all
 
 
 def cut_verification(d, net, pre_relu_indices, fix_intermediate_layer_bounds=True):
@@ -295,26 +287,6 @@ def cut_verification(d, net, pre_relu_indices, fix_intermediate_layer_bounds=Tru
         return None, None
     return None, None
 
-# NOTE
-def initial_check_preimage_approx(A_dict, thre, c, samples=None):
-    """check whether optimization on initial domain is successful"""
-    # lbs: b, n_bounds (already multiplied with c in compute_bounds())
-    assert (arguments.Config["preimage"]["under_approx"] or arguments.Config["preimage"]["over_approx"])
-    debug = arguments.Config["debug"]["asserts"]
-    if arguments.Config["preimage"]["under_approx"]:
-        target_vol, cov_quota, preimage_dict = calc_initial_coverage(A_dict, c, samples, True, debug)
-        if cov_quota >= thre:  # check whether the preimage approx satisfies the criteria
-            print("Reached by optmization on the initial domain!")
-            return True, cov_quota, target_vol, preimage_dict
-        else:
-            return False, cov_quota, target_vol, preimage_dict
-    else:
-        target_vol, cov_quota, preimage_dict = calc_initial_coverage(A_dict, c, samples, False, debug)
-        if cov_quota <= thre:  # check whether the preimage approx satisfies the criteria
-            print("Reached by optmization on the initial domain!")
-            return True, cov_quota, target_vol, preimage_dict
-        else:
-            return False, cov_quota, target_vol, preimage_dict
 
 def relu_bab_parallel(net, domain, x, use_neuron_set_strategy=False, refined_lower_bounds=None,
                       refined_upper_bounds=None, activation_opt_params=None,
@@ -352,7 +324,6 @@ def relu_bab_parallel(net, domain, x, use_neuron_set_strategy=False, refined_low
     cut_enabled = arguments.Config["bab"]["cut"]["enabled"]
     lp_cut_enabled = arguments.Config["bab"]["cut"]["lp_cut"]
     use_batched_domain = arguments.Config["bab"]["batched_domain_list"]
-    
 
     if not isinstance(rhs, torch.Tensor):
         rhs = torch.tensor(rhs)
@@ -368,7 +339,6 @@ def relu_bab_parallel(net, domain, x, use_neuron_set_strategy=False, refined_low
     Flag_covered = False
 
     sample_num = arguments.Config["preimage"]["sample_num"]
-    sample_instability = arguments.Config["preimage"]["instability"]
     debug = arguments.Config["debug"]["asserts"]
     samples = calc_samples((x.ptb.x_L, x.ptb.x_U), net.model_ori, sample_num, debug=debug)
     tot_ambi_nodes_sample = 0
@@ -403,47 +373,38 @@ def relu_bab_parallel(net, domain, x, use_neuron_set_strategy=False, refined_low
         tot_ambi_nodes += n_unstable
 
     print(f'-----------------\n# of unstable neurons (Interval): {tot_ambi_nodes}\n-----------------\n')
-            
-    if sample_instability:
-        # Reduce the search space by using samples to determine (almost) stable activations
-        eps = torch.finfo(samples.X.dtype).eps * 4
-        for act, lb, ub in zip(samples.activations, lower_bounds, upper_bounds):
-            lb = torch.where((act.min(0)[0] < 0.0) | (lb >= 0.0), lb, -eps)
-            ub = torch.where((act.max(0)[0] > 0.0) | (ub <= 0.0), ub, eps)
+
     # NOTE check the first coarsest preimage without any splitting or optimization
-    initial_covered, cov_quota, target_vol, preimage_dict = initial_check_preimage_approx(A, cov_thre, net.c, samples)
+    target_vol, approx_vol, preimage_dict = calc_initial_coverage(A, net.c, samples, bound_lower, debug)
     print('Preimage volume:', target_vol)
+    print('Approximation volume:', approx_vol)
     if debug:
+        for act, lb, ub in zip(samples.activations, lower_bounds, upper_bounds):
+            # Large GMMs are non-deterministic, so we need a suprisingly large epsilon
+            eps = torch.finfo(act.dtype).eps**0.5 * 0.5
+            assert (act[:, None] > lb[None, :] - eps).all().cpu().item()
+            assert (act[:, None] < ub[None, :] + eps).all().cpu().item()
         if bound_lower:
-            assert cov_quota <= 1.0
+            assert approx_vol <= target_vol
         elif bound_upper:
-            assert cov_quota >= 1.0
-    # NOTE second variable is intended for extra constraints
+            assert approx_vol >= target_vol
     times = [time.time() - start]
+    cov_quota = approx_vol / target_vol if target_vol > 0.0 else 0.0
+    print('Coverage quota:', cov_quota)
     coverages = [cov_quota]
     num_domains = [1]
-    if initial_covered:
-        path = save_premap((target_vol, cov_quota, preimage_dict), dict(arguments.Config), arguments.Config["preimage"]["result_dir"], time.time() - start, True, times, coverages, num_domains)
-        return (
-            initial_covered,
-            preimage_dict,
-            Visited,
-            time.time() - start,
-            [cov_quota],
-            1,
-            path
-        )
     if target_vol == 0:
-        path = save_premap((target_vol, cov_quota, preimage_dict), dict(arguments.Config), arguments.Config["preimage"]["result_dir"], time.time() - start, False, times, coverages, num_domains)
-        return (
-            initial_covered,
-            preimage_dict,
-            Visited,
-            time.time() - start,
-            [1],
-            1,
-            path
-        )
+        print("No preimage found!")
+        path = save_premap((target_vol, approx_vol, preimage_dict), dict(arguments.Config), arguments.Config["preimage"]["result_dir"], time.time() - start, True, times, coverages, num_domains)
+        return (False, preimage_dict, Visited, time.time() - start, [cov_quota], 1, path)
+    elif bound_lower and approx_vol / target_vol >= cov_thre:
+        print("Reached by optmization on the initial domain!")
+        path = save_premap((target_vol, approx_vol, preimage_dict), dict(arguments.Config), arguments.Config["preimage"]["result_dir"], time.time() - start, True, times, coverages, num_domains)
+        return (True, preimage_dict, Visited, time.time() - start, [cov_quota], 1, path)
+    elif bound_upper and approx_vol / target_vol <= cov_thre:
+        print("Reached by optmization on the initial domain!")
+        path = save_premap((target_vol, approx_vol, preimage_dict), dict(arguments.Config), arguments.Config["preimage"]["result_dir"], time.time() - start, True, times, coverages, num_domains)
+        return (True, preimage_dict, Visited, time.time() - start, [cov_quota], 1, path)
     # if arguments.Config["preimage"]["save_process"]:
     #     save_path = os.path.join(arguments.Config["preimage"]["result_dir"], 'run_example')
     #     save_file = os.path.join(save_path,'{}_spec_{}_init'.format(arguments.Config["data"]["dataset"], arguments.Config["preimage"]["runner_up"]))
@@ -498,10 +459,6 @@ def relu_bab_parallel(net, domain, x, use_neuron_set_strategy=False, refined_low
     else:
         new_slope = slope
 
-
-
-    # net.tot_ambi_nodes = tot_ambi_nodes
-
     if use_batched_domain:
         assert not use_bab_attack, "Please disable batched_domain_list to run BaB-Attack."
         DomainClass = BatchedReLUDomainList
@@ -510,10 +467,10 @@ def relu_bab_parallel(net, domain, x, use_neuron_set_strategy=False, refined_low
         DomainClass = SortedReLUDomainList
 
     # This is the first (initial) domain.
-    calc_constraints(net, [samples], None, lower_bounds, upper_bounds, debug=debug)
+    calc_constraints(net, [samples], lower_bounds, upper_bounds, debug=debug)
     num_initial_domains = 1
     if bound_lower:
-        domains = DomainClass([(target_vol, cov_quota, 1.0)], [preimage_dict['lA']], [preimage_dict['lbias']],
+        domains = DomainClass([(target_vol, approx_vol, 1.0)], [preimage_dict['lA']], [preimage_dict['lbias']],
                             global_lb, global_ub, lower_bounds, upper_bounds, new_slope,
                             copy.deepcopy(history), [0] * num_initial_domains, net.c, # "[0] * num_initial_domains" corresponds to initial domain depth
                             decision_thresh,
@@ -521,7 +478,7 @@ def relu_bab_parallel(net, domain, x, use_neuron_set_strategy=False, refined_low
                             interm_transfer=arguments.Config["bab"]["interm_transfer"],
                             samples=samples)
     elif bound_upper:
-        domains = DomainClass([(target_vol, cov_quota, 1.0)], [preimage_dict['uA']], [preimage_dict['ubias']],
+        domains = DomainClass([(target_vol, approx_vol, 1.0)], [preimage_dict['uA']], [preimage_dict['ubias']],
                             global_lb, global_ub, lower_bounds, upper_bounds, new_slope,
                             copy.deepcopy(history), [0] * num_initial_domains, net.c, # "[0] * num_initial_domains" corresponds to initial domain depth
                             decision_thresh,
@@ -580,9 +537,6 @@ def relu_bab_parallel(net, domain, x, use_neuron_set_strategy=False, refined_low
         beam_mip_attack.started = False
         global_ub = min(all_label_global_ub, adv_pool.adv_pool[0].obj)
 
-    glb_record = [[time.time()-start, global_lb]]
-    iter_cov_quota = [cov_quota]
-    # run_condition = len(domains) > 0
     num_iter = 0
     gc_time = time.time()
     num_unstable = sum(int(u.sum().detach().cpu().item()) for u in updated_mask)
@@ -615,20 +569,20 @@ def relu_bab_parallel(net, domain, x, use_neuron_set_strategy=False, refined_low
             # Do two batch of neuron set bounds per 10000 domains
             if len(domains) > 80000 and len(domains) % 10000 < batch * 2 and use_neuron_set_strategy:
                 # neuron set  bounds cost more memory, we set a smaller batch here
-                cov_quota, all_node_split = batch_verification(num_unstable, domains, net, int(batch/2), pre_relu_indices, 0,
+                cov_quota, shortcut, all_node_split = batch_verification(num_unstable, domains, net, int(batch/2), pre_relu_indices, 0,
                                         fix_intermediate_layer_bounds=False, stop_func=stop_criterion,
                                         multi_spec_keep_func=multi_spec_keep_func, bound_lower=bound_lower, bound_upper=bound_upper)
             else:
-                cov_quota, all_node_split = batch_verification(num_unstable, domains, net, batch, pre_relu_indices, 0,
+                cov_quota, shortcut, all_node_split = batch_verification(num_unstable, domains, net, batch, pre_relu_indices, 0,
                                         fix_intermediate_layer_bounds=not opt_intermediate_beta,
                                         stop_func=stop_criterion, multi_spec_keep_func=multi_spec_keep_func, bound_lower=bound_lower, bound_upper=bound_upper)
 
-
+            if shortcut and not all_node_split:
+                continue
             times.append(time.time() - start)
             coverages.append(cov_quota)
             num_domains.append(len(domains))
             print(f'--- Iteration {num_iter+1:2d}, Coverage quota {cov_quota:8.6f}, Time {time.time() - start:.1f}s ---')
-            iter_cov_quota.append(cov_quota)
             if debug:
                 assert cov_quota <= 1.0
             if arguments.Config["preimage"]["save_process"]:
@@ -677,20 +631,20 @@ def relu_bab_parallel(net, domain, x, use_neuron_set_strategy=False, refined_low
             # Do two batch of neuron set bounds per 10000 domains
             if len(domains) > 80000 and len(domains) % 10000 < batch * 2 and use_neuron_set_strategy:
                 # neuron set  bounds cost more memory, we set a smaller batch here
-                cov_quota, all_node_split = batch_verification(num_unstable, domains, net, int(batch/2), pre_relu_indices, 0,
+                cov_quota, shortcut, all_node_split = batch_verification(num_unstable, domains, net, int(batch/2), pre_relu_indices, 0,
                                         fix_intermediate_layer_bounds=False, stop_func=stop_criterion,
                                         multi_spec_keep_func=multi_spec_keep_func, bound_lower=bound_lower, bound_upper=bound_upper)
             else:
-                cov_quota, all_node_split = batch_verification(num_unstable,  domains, net, batch, pre_relu_indices, 0,
+                cov_quota, shortcut, all_node_split = batch_verification(num_unstable,  domains, net, batch, pre_relu_indices, 0,
                                         fix_intermediate_layer_bounds=not opt_intermediate_beta,
                                         stop_func=stop_criterion, multi_spec_keep_func=multi_spec_keep_func, bound_lower=bound_lower, bound_upper=bound_upper)
 
-
+            if shortcut and not all_node_split:
+                continue
             times.append(time.time() - start)
             coverages.append(cov_quota)
             num_domains.append(len(domains))
             print(f'--- Iteration {num_iter+1:2d}, Coverage quota {cov_quota:8.6f}, Time {time.time() - start:.1f}s ---')
-            iter_cov_quota.append(cov_quota)
             if debug:
                 assert cov_quota >= 1.0
             if arguments.Config["preimage"]["save_process"]:
@@ -721,7 +675,7 @@ def relu_bab_parallel(net, domain, x, use_neuron_set_strategy=False, refined_low
     path = save_premap(domains, dict(arguments.Config), arguments.Config["preimage"]["result_dir"], time_cost, success, times, coverages, num_domains)
     preimage_dict_all = get_preimage_info(domains)
     del domains
-    return success, preimage_dict_all, Visited, time_cost, iter_cov_quota, subdomain_num, path
+    return success, preimage_dict_all, Visited, time_cost, coverages, subdomain_num, path
 
 
 def get_preimage_info(domains):

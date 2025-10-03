@@ -76,7 +76,7 @@ class ConfigHandler:
         h = ["preimage"]
         self.add_argument("--sample_dir", type=str, default=None, help='Directory to save and load samples for loss estimation and polytope coverage (deprecated).',
                           hierarchy=h + ["sample_dir"])
-        self.add_argument("--result_dir", type=str, default="", help='Result directory to specify for saving your results.',
+        self.add_argument("--result_dir", type=str, default=None, help='Result directory for saving your results.',
                           hierarchy=h + ["result_dir"])
         self.add_argument("--over_approx", type=str2bool, default=False, help='To generate preimage over-approximation or not.',
                     hierarchy=h + ["over_approx"])
@@ -106,9 +106,11 @@ class ConfigHandler:
                           hierarchy=h + ["sample_num"])
         self.add_argument("--branch_budget", type=int, default=10_000, help='Branching budget to see how many preimage polytopes we set as upper limit.',
                           hierarchy=h + ["branch_budget"])
-        self.add_argument("--multi_spec", type=str2bool, default=False, help='The multi specification support for preimage analysis.',
+        self.add_argument("--multi_spec", type=str2bool, default=False, help='The multi specification support for preimage analysis (deprecated).',
                     hierarchy=h + ["multi_spec"])
-        self.add_argument("--sample_instability", type=str2bool, default=False, help='Use sampling identified instability for preimage analysis.',
+        self.add_argument("--sample_instability", type=str2bool, default=True, help='Implicit splits with sampling identified stability for preimage analysis (deprecated).',
+                    hierarchy=h + ["instability"])
+        self.add_argument("--shortcuts", type=str2bool, default=True, help='Preemptively split all branches with samples on only one side.',
                     hierarchy=h + ["instability"])
         self.add_argument("--save_process", type=str2bool, default=False, help='The save preimage polytope support for preimage analysis.',
                     hierarchy=h + ["save_process"])
@@ -156,7 +158,7 @@ class ConfigHandler:
         self.add_argument("--save_adv_example", action='store_true', help='Save returned adversarial example in file.',
                           hierarchy=h + ["save_adv_example"])
         self.add_argument("--precompile_jit", action='store_true',
-                          help='Precompile jit kernels to speed up after jit-wrapped functions, but will cost extra time at the beginning.',
+                          help='Precompile jit kernels to speed up after jit-wrapped functions, but will cost extra time at the beginning (deprecated).',
                           hierarchy=h + ["precompile_jit"])
         self.add_argument('--complete_verifier', choices=["bab", "mip", "bab-refine", "skip"], default="bab",
                           help='Complete verification verifier. "bab": branch and bound with beta-CROWN or GCP-CROWN; "mip": mixed integer programming (MIP) formulation; "bab-refine": branch and bound with intermediate layer bounds computed by MIP.',
@@ -225,7 +227,7 @@ class ConfigHandler:
                           help="Load properties to verify from a .pkl file (only used for oval20 dataset).",
                           hierarchy=h + ["pkl_path"])
         self.add_argument("--filter_path", type=str, default=None,
-                          help='A filter in pkl format contains examples that will be skipped (not used).',
+                          help='A filter in pkl format contains examples that will be skipped (deprecated).',
                           hierarchy=h + ["data_filter_path"])
         self.add_argument("--data_idx_file", type=str, default=None,
                           help='A text file with a list of example IDs to run.',
@@ -253,7 +255,7 @@ class ConfigHandler:
                           hierarchy=h + ["vnnlib_path_prefix"])
 
         h = ["solver"]
-        self.add_argument("--batch_size", type=int, default=1,
+        self.add_argument("--batch_size", type=int, default=2,
                           help='Batch size in bound solver (number of parallel splits).', hierarchy=h + ["batch_size"])
         self.add_argument('--min_batch_size_ratio', type=float, default=1,
                           help='The minimum batch size ratio in each iteration (splitting multiple layers if the number of domains is smaller than min_batch_size_ratio * batch_size).',
@@ -395,7 +397,7 @@ class ConfigHandler:
                           help='Update global upper bound during BaB (has extra overhead, typically the upper bound is not used).',
                           hierarchy=h + ["get_upper_bound"])
         self.add_argument("--DFS_percent", type=float, default=0.,
-                          help='Percent of domains for depth first search (not used).', hierarchy=h + ["dfs_percent"])
+                          help='Percent of domains for depth first search (deprecated).', hierarchy=h + ["dfs_percent"])
         self.add_argument("--disable_pruning_in_iteration", action='store_true', dest='pruning_in_iteration',
                           help='Disable verified domain pruning within iteration.',
                           hierarchy=h + ["pruning_in_iteration"])
