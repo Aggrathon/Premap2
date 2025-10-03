@@ -1,8 +1,6 @@
-[
-![Tests](https://github.com/Aggrathon/Premap2/actions/workflows/pytest.yaml/badge.svg)
-![Coverage](https://img.shields.io/badge/Coverage%20-%20%3E90%20-%20)
-![Style](https://img.shields.io/badge/Style%20-%20Ruff%20-%20%23261230?logo=ruff)
-](https://github.com/Aggrathon/Premap2/actions/workflows/pytest.yaml)
+[![Tests](https://github.com/Aggrathon/Premap2/actions/workflows/pytest.yaml/badge.svg)](https://github.com/Aggrathon/Premap2/actions/workflows/pytest.yaml)
+[![Coverage](https://img.shields.io/badge/Coverage%20-%20%3E90%20-%20)](https://github.com/Aggrathon/Premap2/actions/workflows/pytest.yaml)
+[![Style](https://img.shields.io/badge/Style%20-%20Ruff%20-%20%23261230?logo=ruff)](https://github.com/Aggrathon/Premap2/actions/workflows/pytest.yaml)
 [![License: MIT](https://img.shields.io/github/license/aggrathon/Premap2?label=License)](https://github.com/Aggrathon/Premap2/blob/main/LICENSE)
 ![GitHub Release](https://img.shields.io/github/v/release/aggrathon/Premap2?label=Release)
 [![DOI](https://img.shields.io/badge/DOI%20-%2010.48550%2FarXiv.2505.22798%20-%20%23FAB70C?logo=doi)
