@@ -3,8 +3,8 @@
 [![Style](https://img.shields.io/badge/Style%20-%20Ruff%20-%20%23261230?logo=ruff)](https://github.com/Aggrathon/Premap2/actions/workflows/pytest.yaml)
 [![License: MIT](https://img.shields.io/github/license/aggrathon/Premap2?label=License)](https://github.com/Aggrathon/Premap2/blob/main/LICENSE)
 [![GitHub Release](https://img.shields.io/github/v/release/aggrathon/Premap2?label=Release)](https://github.com/Aggrathon/Premap2/releases)
-[![DOI](https://img.shields.io/badge/DOI%20-%2010.48550%2FarXiv.2505.22798%20-%20%23FAB70C?logo=doi)
-](https://doi.org/10.48550/arXiv.2505.22798)
+[![DOI](https://img.shields.io/badge/DOI%20-%2010.48550%2FarXiv.2505.22798%20-%20%23FAB70C?logo=doi)](https://doi.org/10.48550/arXiv.2505.22798)
+[![Cite](https://img.shields.io/badge/Cite%20-%20.bib%20-%20purple)](https://github.com/Aggrathon/Premap2/blob/main/CITATIONS.bib)
 # PREMAP: Preimage Approximation for Neural Networks
 
 PREMAP is an algorithm for finding both over- and under-approximations for preimages of neural networks.
