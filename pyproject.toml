@@ -46,6 +46,9 @@ testpaths = ["tests"]
 [tool.ruff]
 extend-exclude = ["src/premap", "src/auto_LiRPA", "PreimageApproxForNNs"]
 
+[tool.ruff.lint]
+ignore = ["E741"]
+
 [tool.coverage.run]
 branch = true
 omit = ["PreimageApproxForNNs/*"]
