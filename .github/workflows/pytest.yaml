@@ -4,7 +4,7 @@
 # - run tests
 # - check code coverage
 
-name: pytests
+name: Tests
 
 on:
   workflow_dispatch:

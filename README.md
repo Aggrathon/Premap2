@@ -1,3 +1,12 @@
+[
+![Tests](https://github.com/Aggrathon/Premap2/actions/workflows/pytest.yaml/badge.svg)
+![Coverage](https://img.shields.io/badge/Coverage%20-%20%3E90%20-%20)
+![Style](https://img.shields.io/badge/Style%20-%20Ruff%20-%20%23261230?logo=ruff)
+](https://github.com/Aggrathon/Premap2/actions/workflows/pytest.yaml)
+[![License: MIT](https://img.shields.io/github/license/aggrathon/Premap2?label=License)](https://github.com/Aggrathon/Premap2/blob/main/LICENSE)
+![GitHub Release](https://img.shields.io/github/v/release/aggrathon/Premap2?label=Release)
+[![DOI](https://img.shields.io/badge/DOI%20-%2010.48550%2FarXiv.2505.22798%20-%20%23FAB70C?logo=doi)
+](https://doi.org/10.48550/arXiv.2505.22798)
 # PREMAP: Preimage Approximation for Neural Networks
 
 PREMAP is an algorithm for finding both over- and under-approximations for preimages of neural networks.
@@ -7,7 +16,7 @@ See below for an example or the paper for more information:
 
 > Björklund, A., Zaitsev, M. and Kwiatkowska, M. (2025).
 > **Efficient Preimage Approximation for Neural Network Certification**.
-> Available at: [https://doi.org/10.48550/arXiv.2505.22798](arXiv:2505.22798).
+> Available at: [arXiv:2505.22798](https://doi.org/10.48550/arXiv.2505.22798).
 
 This repository builds upon the [original PREMAP repository](https://github.com/Zhang-Xiyue/PreimageApproxForNNs), which is included as a git subtree in [PreimageApproxForNNs](PreimageApproxForNNs/).
 The main goal of this version is to improve the scalability so that, e.g., it is feasible to certify convolutional neural networks against patch attacks (more info in [the paper](https://doi.org/10.48550/arXiv.2505.22798))
@@ -15,7 +24,7 @@ The main goal of this version is to improve the scalability so that, e.g., it is
 
 ## Example
 
-> TODO Insert example
+![Example patch attack](example.webp)
 
 See [the paper](https://doi.org/10.48550/arXiv.2505.22798) for more examples and use cases.
 
@@ -30,14 +39,14 @@ The PREMAP CLI is available through `uv run premap` and works just like [before]
 
 ```bash
 # NOTE: The --directory is only used to get the correct local paths in the config
-uv run --directory PreimageApproxForNNs premap --config src/preimg_configs/vcas.yaml
+uv run --directory PreimageApproxForNNs premap --config src/preimg_configs/vcas.yaml --enable_input_split False
 # For more details see
 uv run premap --help
 ```
 
 ### Package
 
-In addition, it is possible to run it as a library using `from premap2 import premap` that takes the same arguments as the CLI (but without the -- in front) and returns the path to where the results are stored. With the package you can also pass the model as a `torch.nn.Module` and the data as a list (instead of a `Customized("path","function")`).
+In addition, it is possible to run it as a library using `from premap2 import premap` that takes the same arguments as the CLI (but without the `--` in front) and returns the path to where the results are stored. With the package you can also pass the model as a `torch.nn.Module` and the data as a list (instead of a `Customized("path","function")`).
 
 ```python
 from premap2 import premap, get_arguments
@@ -94,5 +103,5 @@ Then you can use, e.g., [snakeviz](https://github.com/jiffyclub/snakeviz) to vis
 
 ## Acknowledgements
 
-This project recieved funding from the ERC under the European Union’s Horizon 2020 research and innovation programme (FUN2MODEL, grant agreement No. 834115)
+This project received funding from the ERC under the European Union’s Horizon 2020 research and innovation programme (FUN2MODEL, grant agreement No. 834115)
 and ELSA: European Lighthouse on Secure and Safe AI project (grant agreement No. 101070617 under UK guarantee).
