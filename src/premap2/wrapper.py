@@ -67,6 +67,7 @@ def construct_config(
 
 
 def premap(
+    *,
     command_line: bool = False,
     post_config: None | Callable[[object], None] = None,
     premap_path: None | str = None,
@@ -79,7 +80,7 @@ def premap(
 
     NOTE: The `model` argument can be a `torch.nn.Module` and `dataset` a `[X, labels, xmax, xmin]`.
 
-    Args:
+    Keyword Args:
         command_line: Also read commandline arguments.
         post_config: Optional post processing function that takes `arguments.Config`.
         premap_path: Path to the `src` folder of the PREMAP package.
@@ -126,7 +127,7 @@ def get_arguments(
         else:
             args = []
             for action in arguments.Config.defaults_parser._actions:
-                if action.dest == "help":
+                if action.dest == "help" or "deprecated" in action.help:
                     continue
                 elif action.choices is not None:
                     choice = action.choices
@@ -146,8 +147,4 @@ def get_arguments(
 
 def cli():
     """Command line interface for PREMAP (reads arguments from `sys.argv`)."""
-    with PremapInPath():
-        import preimage_main  # type: ignore
-
-        construct_config(command_line=True)
-        preimage_main.main()
+    premap(command_line=True)
