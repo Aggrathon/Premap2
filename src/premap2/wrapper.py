@@ -73,6 +73,7 @@ def premap(
     premap_path: None | str = None,
     defaults: dict[str, object] | None = None,
     silent: bool = False,
+    help: bool = False,
     **kwargs,
 ) -> list[Path] | list[IO[Any]]:
     """Wrapper for PREMAP that takes keyword arguments (instead of commandline arguments).
@@ -86,11 +87,14 @@ def premap(
         premap_path: Path to the `src` folder of the PREMAP package.
         defaults: Keyword arguments with lower priority than a config file.
         silent: Do not print to stdout.
+        help: Print command line instructions.
         **kwargs: Keyword arguments with higher priority than commandline and config file.
 
     Returns:
         List of result files (typically just one) that can be loaded with `torch.load`.
     """
+    if help:
+        return get_arguments(True)  # type: ignore
     with PremapInPath(premap_path):
         import preimage_main  # type: ignore
 
@@ -127,7 +131,11 @@ def get_arguments(
         else:
             args = []
             for action in arguments.Config.defaults_parser._actions:
-                if action.dest == "help" or "deprecated" in action.help:
+                if (
+                    action.dest == "help"
+                    or "deprecated" in action.help
+                    or "o not use" in action.help
+                ):
                     continue
                 elif action.choices is not None:
                     choice = action.choices

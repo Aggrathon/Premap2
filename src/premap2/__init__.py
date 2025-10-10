@@ -7,4 +7,5 @@ from .splitting import (  # noqa: F401
     stabilize_on_samples,
 )
 from .utils import result_contains  # noqa: F401
+from .wrapper import get_arguments  # noqa: F401
 from .wrapper import premap as premap
