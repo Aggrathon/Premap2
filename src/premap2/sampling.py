@@ -6,7 +6,6 @@ import numpy as np
 import torch
 from sortedcontainers import SortedList
 
-from auto_LiRPA.patches import Patches
 from premap2.raycast import raycast_batch
 from premap2.tighten_bounds import tighten_backwards
 from premap2.utils import (
@@ -19,6 +18,7 @@ from premap2.utils import (
 )
 
 try:
+    from auto_LiRPA.patches import Patches
     from premap.preimage_beta_crown_solver_relu_split import LiRPAConvNet
 except ImportError:
     pass
@@ -164,7 +164,11 @@ class Samples:
 
 
 TensorLike = TypeVar(
-    "TensorLike", torch.Tensor, Patches, torch.Tensor | None, list[torch.Tensor] | None
+    "TensorLike",
+    torch.Tensor,
+    "Patches",
+    torch.Tensor | None,
+    list[torch.Tensor] | None,
 )
 
 
@@ -198,9 +202,9 @@ def _expand_patch(
 
 @dataclass
 class LinearBounds:
-    lA: torch.Tensor | Patches
+    lA: "torch.Tensor | Patches"
     lb: torch.Tensor
-    uA: torch.Tensor | Patches
+    uA: "torch.Tensor | Patches"
     ub: torch.Tensor
     lower: torch.Tensor
     upper: torch.Tensor
@@ -256,8 +260,8 @@ def calc_constraints(
 
 
 def _get_Abs(
-    Abs: dict[str, torch.Tensor | Patches], key: str, index: int
-) -> torch.Tensor | Patches | None:
+    Abs: dict[str, "torch.Tensor | Patches"], key: str, index: int
+) -> "torch.Tensor | Patches | None":
     value = Abs.get(key, None)
     if value is None:
         return value
@@ -325,7 +329,7 @@ def get_constraints(
 
 
 def sparse_patches_to_matrix(
-    patch: Patches, indices: list[int], shape: torch.Size
+    patch: "Patches", indices: list[int], shape: torch.Size
 ) -> torch.Tensor:
     c, _, w, h, *_ = patch.shape
     c, w, h = np.unravel_index(indices, (c, w, h))
