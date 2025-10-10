@@ -10,9 +10,9 @@ on:
   workflow_dispatch:
   push:
     branches: [master, main]
-    paths: ["src/*.py", "tests/*.py"]
+    paths: ["src/**.py", "tests/**.py"]
   pull_request:
-    paths: ["src/*.py", "tests/*.py"]
+    paths: ["src/**.py", "tests/**.py"]
 
 jobs:
   test:
