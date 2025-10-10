@@ -3,8 +3,12 @@ from typing import Any, Iterable
 
 import torch
 
-from auto_LiRPA import BoundedModule, BoundedTensor
 from premap2.utils import IS_TEST_OR_DEBUG
+
+try:
+    from auto_LiRPA import BoundedModule, BoundedTensor
+except ImportError:
+    pass
 
 
 class NewBounds:
@@ -51,8 +55,8 @@ class NewBounds:
 
 
 def tighten_bounds(
-    lirpa: BoundedModule,
-    x: BoundedTensor,
+    lirpa: "BoundedModule",
+    x: "BoundedTensor",
     bounds: dict[str, tuple[torch.Tensor, torch.Tensor]],
     new_bounds: None | tuple[int, int] | NewBounds = None,
     debug: bool = IS_TEST_OR_DEBUG,
@@ -85,8 +89,8 @@ def tighten_bounds(
 
 
 def tighten_bounds_forward(
-    lirpa: BoundedModule,
-    x: BoundedTensor,
+    lirpa: "BoundedModule",
+    x: "BoundedTensor",
     bounds: dict[str, tuple[torch.Tensor, torch.Tensor]],
     start_layer: int = -1,
     debug: bool = IS_TEST_OR_DEBUG,
@@ -132,8 +136,8 @@ def tighten_bounds_forward(
 
 
 def tighten_bounds_backward(
-    lirpa: BoundedModule,
-    x: BoundedTensor,
+    lirpa: "BoundedModule",
+    x: "BoundedTensor",
     bounds: dict[str, tuple[torch.Tensor, torch.Tensor]],
     layer: int,
     batches: list[tuple[int, torch.LongTensor, torch.LongTensor]],

@@ -36,15 +36,29 @@ This project was set up using [uv](https://docs.astral.sh/uv) (just run `uv sync
 The PREMAP CLI is available through `uv run premap` and works just like [before](https://github.com/Zhang-Xiyue/PreimageApproxForNNs) (which is similar to [α,β-CROWN](https://github.com/Verified-Intelligence/alpha-beta-CROWN)).
 
 ```bash
+git clone https://github.com/Aggrathon/Premap2.git && cd Premap2
 # NOTE: The --directory is only used to get the correct local paths in the config
 uv run --directory PreimageApproxForNNs premap --config src/preimg_configs/vcas.yaml --enable_input_split False
 # For more details see
 uv run premap --help
 ```
 
+To avoid manually cloning the reposity you can also use:
+
+```bash
+uvx --with https://github.com/Aggrathon/Premap2 premap2
+```
+
+
 ### Package
 
-In addition, it is possible to run it as a library using `from premap2 import premap` that takes the same arguments as the CLI (but without the `--` in front) and returns the path to where the results are stored. With the package you can also pass the model as a `torch.nn.Module` and the data as a list (instead of a `Customized("path","function")`).
+In addition, it is (now) possible to run PREMAP as a library by either cloning the repo or adding it as a dependency with:
+
+```bash
+uv add https://github.com/Aggrathon/Premap2
+```
+
+From Python we use the `premap` function (`from premap2 import premap`) that takes the same arguments as the CLI (but without the `--` in front) and returns paths to where the results are stored. With this function you can also pass the model as a `torch.nn.Module` and the data as a list (instead of a `Customized("path","function")`).
 
 ```python
 from premap2 import premap, get_arguments
@@ -56,7 +70,7 @@ x = torch.rand((1, 20))
 y = model(x).argmax(1)
 x_max = 1.0
 x_min = 0.0
-result = premap(model=model, dataset=(x, y, x_max, x_min), label=0, num_outputs=3, robustness_type='verified-acc')
+results = premap(model=model, dataset=(x, y, x_max, x_min), label=0, num_outputs=3, robustness_type='verified-acc')
 
 # Convolutional neural netwok, certifying a patch attack against the runner up class
 model = torch.nn.Sequential(torch.nn.Conv2d(3, 8, 3), torch.nn.ReLU(), torch.nn.Flatten(), torch.nn.Linear(8*3*3, 4))
@@ -65,7 +79,10 @@ y = model(x)
 c = y.argmax(1)
 y[:, c] = -1000
 runner_up = y.argmax(1)
-result = premap(model=model, dataset=(x, c, 1.0, 0.0), label=c[0], patch_x=1, patch_y=2, patch_w=3, patch_h=2, runner_up=runner_up, num_outputs=4, robustness_type='runnerup', threshold=0.75)
+results = premap(model=model, dataset=(x, c, 1.0, 0.0), label=c[0], patch_x=1, patch_y=2, patch_w=3, patch_h=2, runner_up=runner_up, num_outputs=4, robustness_type='runnerup', threshold=0.75)
+
+# To read the results
+result = torch.load(results[0])
 
 # To get a list of available arguments use
 print(get_arguments())

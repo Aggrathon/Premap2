@@ -4,12 +4,12 @@ from itertools import repeat
 import numpy as np
 import torch
 
-from auto_LiRPA.bound_general import BoundedTensor, PerturbationLpNorm
 from premap2.sampling import Samples
 from premap2.tighten_bounds import NewBounds, tighten_bounds
 from premap2.utils import IS_TEST_OR_DEBUG, assert_bounds, assert_contains_his
 
 try:
+    from auto_LiRPA.bound_general import BoundedTensor, PerturbationLpNorm
     from premap.branching_domains import ReLUDomain, SortedReLUDomainList
     from premap.preimage_beta_crown_solver_relu_split import LiRPAConvNet
 except ImportError:
@@ -618,11 +618,11 @@ def get_updated_bounds(
 
 
 def _make_bounded_tensor(
-    x: BoundedTensor,
+    x: "BoundedTensor",
     samples: list[Samples],
     lower: torch.Tensor | None = None,
     upper: torch.Tensor | None = None,
-) -> BoundedTensor:
+) -> "BoundedTensor":
     if lower is None:
         lower = torch.cat([s.lower for s in samples])
     if upper is None:

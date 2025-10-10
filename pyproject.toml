@@ -1,6 +1,6 @@
 [project]
 name = "premap2"
-version = "0.2.0"
+version = "0.2.1"
 description = "Preimage approximations for neural networks"
 readme = "README.md"
 authors = [
@@ -25,8 +25,19 @@ dependencies = [
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.package-dir]
+# In case the symlinks fail (on Windows)
+"" = "src"
+premap2 = "src/premap2"
+premap = "PreimageApproxForNNs/src"
+auto_LiRPA = "PreimageApproxForNNs/auto_LiRPA"
+
 [tool.uv.sources]
 onnx2pytorch = { git = "https://github.com/KaidiXu/onnx2pytorch" }
+
+[project.urls]
+Homepage = "https://github.com/Aggrathon/Premap2"
+Repository = "https://github.com/Aggrathon/Premap2.git"
 
 [dependency-groups]
 dev = [
@@ -38,6 +49,7 @@ dev = [
 
 [project.scripts]
 premap = "premap2.wrapper:cli"
+premap2 = "premap2.wrapper:cli"
 
 [tool.pytest.ini_options]
 addopts = ["--cov", "--cov-report="]
@@ -63,5 +75,5 @@ exclude_also = [
     "ImportError",
     "torch.cuda",
     "if debug:",
-    "@torch.jit.script"
+    "@torch.jit.script",
 ]
