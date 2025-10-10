@@ -147,4 +147,6 @@ def get_arguments(
 
 def cli():
     """Command line interface for PREMAP (reads arguments from `sys.argv`)."""
+    if len(sys.argv) < 2:
+        sys.argv.append("--help")
     premap(command_line=True)
