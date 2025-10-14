@@ -17,36 +17,41 @@ See below for an example or the paper for more information:
 > Available at: [arXiv:2505.22798](https://doi.org/10.48550/arXiv.2505.22798).
 
 This repository builds upon the [original PREMAP repository](https://github.com/Zhang-Xiyue/PreimageApproxForNNs), which is included as a git subtree in [PreimageApproxForNNs](PreimageApproxForNNs/).
-The main goal of this version is to improve the scalability so that, e.g., it is feasible to certify convolutional neural networks against patch attacks (more info in [the paper](https://doi.org/10.48550/arXiv.2505.22798))
+The main goal of this version is to improve the scalability, to make it tractable to, e.g., certify the robustness of convolutional neural networks against patch attacks.
+For more info see [the paper](https://doi.org/10.48550/arXiv.2505.22798).
 
 
 ## Example
 
 ![Example patch attack](example.webp)
 
+Here we define a custom patch shape inspired by a sunbeam and apply PREMAP, tracking the growth of the approximation ratio over time.
 See [the paper](https://doi.org/10.48550/arXiv.2505.22798) for more examples and use cases.
 
 
 ## Usage
 
-This project was set up using [uv](https://docs.astral.sh/uv) (just run `uv sync` to install all dependencies), but if you prefer "normal" python package management you can use `pip install --editable .` (see `pyproject.toml` for a list of dependencies).
+This project was set up using [uv](https://docs.astral.sh/uv) (just run `uv sync` to install all dependencies after cloning the repo), but if you prefer "normal" python package management you can use `pip install --editable .` (see `pyproject.toml` for a list of dependencies).
 
 ### CLI
 
 The PREMAP CLI is available through `uv run premap` and works just like [before](https://github.com/Zhang-Xiyue/PreimageApproxForNNs) (which is similar to [α,β-CROWN](https://github.com/Verified-Intelligence/alpha-beta-CROWN)).
 
 ```bash
+# Clone repo
 git clone https://github.com/Aggrathon/Premap2.git && cd Premap2
-# NOTE: The --directory is only used to get the correct local paths in the config
-uv run --directory PreimageApproxForNNs premap --config src/preimg_configs/vcas.yaml --enable_input_split False
+# Run premap with an existing config (overriding relu/input splitting and the model path)
+uv run premap --config PreimageApproxForNNs/src/preimg_configs/vcas.yaml --enable_input_split False --onnx_path PreimageApproxForNNs/model_dir/VCAS_21/VertCAS_1.onnx
 # For more details see
 uv run premap --help
+# and if not using uv
+python -m premap --help
 ```
 
 To avoid manually cloning the reposity you can also use:
 
 ```bash
-uvx --with https://github.com/Aggrathon/Premap2 premap2
+uvx --with https://github.com/Aggrathon/Premap2.git premap2 --help
 ```
 
 
@@ -70,7 +75,7 @@ x = torch.rand((1, 20))
 y = model(x).argmax(1)
 x_max = 1.0
 x_min = 0.0
-results = premap(model=model, dataset=(x, y, x_max, x_min), label=0, num_outputs=3, robustness_type='verified-acc')
+results = premap(model=model, dataset=(x, y, x_max, x_min), label=0, num_outputs=3, robustness_type='verified-acc', silent=True)
 
 # Convolutional neural netwok, certifying a patch attack against the runner up class
 model = torch.nn.Sequential(torch.nn.Conv2d(3, 8, 3), torch.nn.ReLU(), torch.nn.Flatten(), torch.nn.Linear(8*3*3, 4))
@@ -83,9 +88,14 @@ results = premap(model=model, dataset=(x, c, 1.0, 0.0), label=c[0], patch_x=1, p
 
 # To read the results
 result = torch.load(results[0])
+print("Preimage volume:", result["preimage_vol"])
+print("Approximation coverage:", result["coverage"])
+print("Domains:", len(result["domains"]))
 
 # To get a list of available arguments use
-print(get_arguments())
+get_arguments(print=True)
+# or
+print(*get_arguments(), sep="\n")
 ```
 
 
@@ -97,7 +107,7 @@ print(get_arguments())
 - `src/premap2` contains new files for PREMAP.
 - `src/premap` is a symlink to `PreimageApproxForNNs/src`.
 - `src/auto_LiRPA` is a symlink to `PreimageApproxForNNs/auto_LiRPA`.
-- `test` contains unit tests for premap2.
+- `tests` contains unit tests for premap2.
 
 The coding style for new code is [black](https://github.com/psf/black).
 When editing the subtree (`PreimageApproxForNNs`), please disable auto-formatting to keep the git diff readable.
