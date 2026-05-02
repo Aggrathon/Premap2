@@ -8,11 +8,11 @@
 # PREMAP: Preimage Approximation for Neural Networks
 
 PREMAP is an algorithm for finding both over- and under-approximations for preimages of neural networks.
-The preimage is the set of inputs that lead to a specified set of outputs.
+A preimage is the set of inputs that lead to a specified set of outputs.
 Hence, preimage under-approximation can be used for, e.g., quantitative certification of neural networks.
 See below for an example or the paper for more information:
 
-> Björklund, A., Zaitsev, M. and Kwiatkowska, M. (2025).
+> Björklund, A., Zaitsev, M., P. Morettin, and Kwiatkowska, M. (2025).
 > **Efficient Preimage Approximation for Neural Network Certification**.
 > Available at: [arXiv:2505.22798](https://doi.org/10.48550/arXiv.2505.22798).
 
@@ -44,8 +44,10 @@ git clone https://github.com/Aggrathon/Premap2.git && cd Premap2
 uv run premap --config PreimageApproxForNNs/src/preimg_configs/vcas.yaml --enable_input_split False --onnx_path PreimageApproxForNNs/model_dir/VCAS_21/VertCAS_1.onnx
 # For more details see
 uv run premap --help
-# and if not using uv
+# And if not using uv
 python -m premap --help
+# To force a CPU version of torch (on platforms defaulting to CUDA)
+uv run --extra cpu ...
 ```
 
 To avoid manually cloning the reposity you can also use:

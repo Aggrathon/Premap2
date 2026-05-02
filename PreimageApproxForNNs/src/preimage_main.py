@@ -22,7 +22,7 @@ from auto_LiRPA import BoundedTensor
 from auto_LiRPA.perturbations import PerturbationLpNorm
 from auto_LiRPA.utils import stop_criterion_min
 # NOTE use newly-designed algorithm for preimage
-from preimage_beta_crown_solver_relu_split import LiRPAConvNet
+from preimage_beta_crown_solver_relu_split import LiRPAConvNet 
 # from lp_mip_solver import FSB_score
 from utils import parse_run_mode
 # from nn4sys_verification import nn4sys_verification
@@ -154,7 +154,7 @@ def mip(saved_bounds, labels_to_verify=None):
 def bab(unwrapped_model, data, targets, y, data_ub, data_lb,
         lower_bounds=None, upper_bounds=None, reference_slopes=None,
         attack_images=None, c=None, all_prop=None, cplex_processes=None,
-        activation_opt_params=None, reference_lA=None, rhs=None,
+        activation_opt_params=None, reference_lA=None, rhs=None, 
         model_incomplete=None, timeout=None, refined_betas=None):
 
     norm = arguments.Config["specification"]["norm"]
@@ -193,13 +193,13 @@ def bab(unwrapped_model, data, targets, y, data_ub, data_lb,
             model, domain, x, model_ori=unwrapped_model, all_prop=all_prop,
             rhs=rhs, timeout=timeout, branching_method=arguments.Config["bab"]["branching"]["method"])
     else:
-        covered, preimage_dict, nb_visited, time_cost, iter_cov_quota, subdomain_num, path = relu_bab_parallel(
+        covered, nb_visited, time_cost, iter_cov_quota, subdomain_num, path = relu_bab_parallel(
             model, domain, x,
             refined_lower_bounds=lower_bounds, refined_upper_bounds=upper_bounds,
             activation_opt_params=activation_opt_params, reference_lA=reference_lA,
             reference_slopes=reference_slopes, attack_images=attack_images,
-            timeout=timeout, refined_betas=refined_betas, rhs=rhs)
-
+            timeout=timeout, refined_betas=refined_betas, rhs=rhs)  
+     
     # else:
     #     covered, preimage_dict, nb_visited, time_cost, iter_cov_quota, subdomain_num = relu_bab_parallel(
     #         model, domain, x,y,
@@ -211,8 +211,8 @@ def bab(unwrapped_model, data, targets, y, data_ub, data_lb,
     #     save_path = os.path.join(arguments.Config["preimage"]["result_dir"], 'polytope')
     #     save_file = os.path.join(save_path,'{}_atk_{}'.format(arguments.Config["data"]["dataset"], arguments.Config["preimage"]["atk_tp"]))
     #     with open(save_file, 'wb') as f:
-    #         pickle.dump(preimage_dict, f)
-    return covered, preimage_dict, nb_visited, time_cost, iter_cov_quota, subdomain_num, path
+    #         pickle.dump(preimage_dict, f) 
+    return covered, nb_visited, time_cost, iter_cov_quota, subdomain_num, path
 
 
 def update_parameters(model, data_min, data_max):
@@ -311,7 +311,7 @@ def preimage_workflow(
             this_spec_attack_images = attack_images[:, :, property_idx].view(attack_images.size(1), *attack_images.shape[3:])
         else:
             this_spec_attack_images = None
-
+ 
         if arguments.Config["general"]["enable_incomplete_verification"]:
             # extract lower bound by (sorted) init_global_lb and batch size of initial_max_domains
             this_batch_start_idx = property_idx * arguments.Config["bab"]["initial_max_domains"]
@@ -393,7 +393,7 @@ def preimage_workflow(
             assert arguments.Config["general"]["complete_verifier"] == "bab"  # for MIP and BaB-Refine.
             assert not arguments.Config["bab"]["attack"]["enabled"], "BaB-attack must be used with incomplete verifier."
             # input split also goes here directly
-            covered, preimage_dict, nb_visited, time_cost, iter_cov_quota, subdomain_num, path = bab(
+            covered, nb_visited, time_cost, iter_cov_quota, subdomain_num, path = bab(
                 model_ori, x, pidx, y, data_ub=data_max, data_lb=data_min, c=c,
                 all_prop=target_label_arrays, cplex_processes=cplex_processes,
                 rhs=rhs, timeout=timeout, attack_images=this_spec_attack_images)
@@ -505,7 +505,7 @@ def main():
             x, data_max, data_min = x.to(device), data_max.to(device), data_min.to(device)
 
             verified_status = "unknown"
-            verified_success = False
+            verified_success = False                
 
             if arguments.Config["attack"]["pgd_order"] == "before":
                 verified_status, verified_success, attack_images, attack_margins, all_adv_candidates = attack(

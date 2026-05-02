@@ -2,10 +2,17 @@ version = 1
 revision = 3
 requires-python = ">=3.10"
 resolution-markers = [
-    "python_full_version >= '3.12'",
-    "python_full_version == '3.11.*'",
-    "python_full_version < '3.11'",
+    "(python_full_version >= '3.11' and sys_platform == 'linux' and extra != 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and sys_platform == 'linux' and extra != 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra != 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra != 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')",
+    "sys_platform == 'darwin' and extra != 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117'",
+    "python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra != 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117'",
+    "(python_full_version >= '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu' and extra != 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu' and extra != 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu' and extra != 'extra-7-premap2-cu117') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-7-premap2-cpu' and extra != 'extra-7-premap2-cu117')",
+    "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu' and extra != 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu' and extra != 'extra-7-premap2-cu117')",
+    "extra != 'extra-7-premap2-cpu' and extra != 'extra-7-premap2-cu117'",
 ]
+conflicts = [[
+    { package = "premap2", extra = "cpu" },
+    { package = "premap2", extra = "cu117" },
+]]
 
 [[package]]
 name = "asttokens"
@@ -173,7 +180,7 @@ wheels = [
 
 [package.optional-dependencies]
 toml = [
-    { name = "tomli", marker = "python_full_version <= '3.11'" },
+    { name = "tomli", marker = "python_full_version <= '3.11' or (extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
 ]
 
 [[package]]
@@ -217,7 +224,7 @@ name = "humanfriendly"
 version = "10.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pyreadline3", marker = "sys_platform == 'win32'" },
+    { name = "pyreadline3", marker = "sys_platform == 'win32' or (extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/cc/3f/2c29224acb2e2df4d2046e4c73ee2662023c58ff5b113c4c1adac0886c43/humanfriendly-10.0.tar.gz", hash = "sha256:6b0b831ce8f15f7300721aa49829fc4e83921a9a301cc7f606be6686a2288ddc", size = 360702, upload-time = "2021-09-17T21:40:43.31Z" }
 wheels = [
@@ -247,17 +254,17 @@ name = "ipython"
 version = "8.32.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
     { name = "decorator" },
-    { name = "exceptiongroup", marker = "python_full_version < '3.11'" },
+    { name = "exceptiongroup", marker = "python_full_version < '3.11' or (extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
     { name = "jedi" },
     { name = "matplotlib-inline" },
-    { name = "pexpect", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "pexpect", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32') or (sys_platform == 'emscripten' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'win32' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
     { name = "prompt-toolkit" },
     { name = "pygments" },
     { name = "stack-data" },
     { name = "traitlets" },
-    { name = "typing-extensions", marker = "python_full_version < '3.12'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.12' or (extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/36/80/4d2a072e0db7d250f134bc11676517299264ebe16d62a8619d49a78ced73/ipython-8.32.0.tar.gz", hash = "sha256:be2c91895b0b9ea7ba49d33b23e2040c352b33eb6a519cca7ce6e0c743444251", size = 5507441, upload-time = "2025-01-31T14:04:45.197Z" }
 wheels = [
@@ -334,11 +341,12 @@ name = "nvidia-cublas-cu11"
 version = "11.10.3.66"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "setuptools" },
-    { name = "wheel" },
+    { name = "setuptools", marker = "(extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (extra != 'extra-7-premap2-cpu' and extra != 'extra-7-premap2-cu117')" },
+    { name = "wheel", marker = "(extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (extra != 'extra-7-premap2-cpu' and extra != 'extra-7-premap2-cu117')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ce/41/fdeb62b5437996e841d83d7d2714ca75b886547ee8017ee2fe6ea409d983/nvidia_cublas_cu11-11.10.3.66-py3-none-manylinux1_x86_64.whl", hash = "sha256:d32e4d75f94ddfb93ea0a5dda08389bcc65d8916a25cb9f37ac89edaeed3bded", size = 317097917, upload-time = "2022-08-11T17:32:30.789Z" },
+    { url = "https://files.pythonhosted.org/packages/7a/08/57e6b6481af73590259a9600c32a68eb853966e354fca147cde17ed9ea27/nvidia_cublas_cu11-11.10.3.66-py3-none-win_amd64.whl", hash = "sha256:8ac17ba6ade3ed56ab898a036f9ae0756f1e81052a317bf98f8c6d18dc3ae49e", size = 311065222, upload-time = "2022-08-03T21:16:08.044Z" },
 ]
 
 [[package]]
@@ -348,6 +356,7 @@ source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ef/25/922c5996aada6611b79b53985af7999fc629aee1d5d001b6a22431e18fec/nvidia_cuda_nvrtc_cu11-11.7.99-2-py3-none-manylinux1_x86_64.whl", hash = "sha256:9f1562822ea264b7e34ed5930567e89242d266448e936b85bc97a3370feabb03", size = 21011023, upload-time = "2022-09-21T23:12:53.384Z" },
     { url = "https://files.pythonhosted.org/packages/ea/8d/0709ba16c2831c17ec1c2ea1eeb89ada11ffa8d966d773cce0a7463b22bb/nvidia_cuda_nvrtc_cu11-11.7.99-py3-none-manylinux1_x86_64.whl", hash = "sha256:f7d9610d9b7c331fa0da2d1b2858a4a8315e6d49765091d28711c8946e7425e7", size = 21010447, upload-time = "2022-08-03T20:59:13.991Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/10/c9fc448f33d439981d6a74b693526871c4ef13e8d81a7b4de12e3a12a1b9/nvidia_cuda_nvrtc_cu11-11.7.99-py3-none-win_amd64.whl", hash = "sha256:f2effeb1309bdd1b3854fc9b17eaf997808f8b25968ce0c7070945c4265d64a3", size = 17040212, upload-time = "2022-08-03T21:15:19.801Z" },
 ]
 
 [[package]]
@@ -355,11 +364,12 @@ name = "nvidia-cuda-runtime-cu11"
 version = "11.7.99"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "setuptools" },
-    { name = "wheel" },
+    { name = "setuptools", marker = "(extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (extra != 'extra-7-premap2-cpu' and extra != 'extra-7-premap2-cu117')" },
+    { name = "wheel", marker = "(extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (extra != 'extra-7-premap2-cpu' and extra != 'extra-7-premap2-cu117')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/36/92/89cf558b514125d2ebd8344dd2f0533404b416486ff681d5434a5832a019/nvidia_cuda_runtime_cu11-11.7.99-py3-none-manylinux1_x86_64.whl", hash = "sha256:cc768314ae58d2641f07eac350f40f99dcb35719c4faff4bc458a7cd2b119e31", size = 849253, upload-time = "2022-08-03T20:58:27.979Z" },
+    { url = "https://files.pythonhosted.org/packages/32/2c/d89ea2b4051fbabff8d2edda8c735dabae6d5d1b8d5215f9749d38dcdb72/nvidia_cuda_runtime_cu11-11.7.99-py3-none-win_amd64.whl", hash = "sha256:bc77fa59a7679310df9d5c70ab13c4e34c64ae2124dd1efd7e5474b71be125c7", size = 991354, upload-time = "2022-08-03T21:14:37.958Z" },
 ]
 
 [[package]]
@@ -367,7 +377,7 @@ name = "nvidia-cudnn-cu11"
 version = "8.5.0.96"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu11" },
+    { name = "nvidia-cublas-cu11", marker = "(extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (extra != 'extra-7-premap2-cpu' and extra != 'extra-7-premap2-cu117')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/dc/30/66d4347d6e864334da5bb1c7571305e501dcb11b9155971421bb7bb5315f/nvidia_cudnn_cu11-8.5.0.96-2-py3-none-manylinux1_x86_64.whl", hash = "sha256:402f40adfc6f418f9dae9ab402e773cfed9beae52333f6d86ae3107a1b9527e7", size = 557141533, upload-time = "2022-09-21T21:55:09.845Z" },
@@ -407,8 +417,16 @@ version = "0.4.1"
 source = { git = "https://github.com/KaidiXu/onnx2pytorch#8447c42c3192dad383e5598edc74dddac5706ee2" }
 dependencies = [
     { name = "onnx" },
-    { name = "torch" },
-    { name = "torchvision" },
+    { name = "torch", version = "1.13.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (python_full_version >= '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "torch", version = "1.13.1", source = { registry = "https://download.pytorch.org/whl/cu117" }, marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (python_full_version >= '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "torch", version = "1.13.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (extra != 'extra-7-premap2-cpu' and extra != 'extra-7-premap2-cu117')" },
+    { name = "torch", version = "1.13.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(python_full_version >= '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (python_full_version < '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-7-premap2-cpu') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "torch", version = "1.13.1+cu117", source = { registry = "https://download.pytorch.org/whl/cu117" }, marker = "(python_full_version >= '3.11' and extra == 'extra-7-premap2-cu117') or (python_full_version < '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cu117') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cu117')" },
+    { name = "torchvision", version = "0.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (python_full_version >= '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "torchvision", version = "0.14.1", source = { registry = "https://download.pytorch.org/whl/cu117" }, marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (python_full_version >= '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cu117') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "torchvision", version = "0.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (extra != 'extra-7-premap2-cpu' and extra != 'extra-7-premap2-cu117')" },
+    { name = "torchvision", version = "0.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(python_full_version >= '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (python_full_version < '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-7-premap2-cpu') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "torchvision", version = "0.14.1+cu117", source = { registry = "https://download.pytorch.org/whl/cu117" }, marker = "(python_full_version >= '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (python_full_version < '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
 ]
 
 [[package]]
@@ -555,7 +573,7 @@ wheels = [
 
 [[package]]
 name = "premap2"
-version = "0.2.1"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "numpy" },
@@ -566,9 +584,31 @@ dependencies = [
     { name = "pyyaml" },
     { name = "setuptools" },
     { name = "sortedcontainers" },
-    { name = "torch" },
-    { name = "torchvision" },
+    { name = "torch", version = "1.13.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (python_full_version >= '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "torch", version = "1.13.1", source = { registry = "https://download.pytorch.org/whl/cu117" }, marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (python_full_version >= '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "torch", version = "1.13.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (extra != 'extra-7-premap2-cpu' and extra != 'extra-7-premap2-cu117')" },
+    { name = "torch", version = "1.13.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(python_full_version >= '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (python_full_version < '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-7-premap2-cpu') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "torch", version = "1.13.1+cu117", source = { registry = "https://download.pytorch.org/whl/cu117" }, marker = "(python_full_version >= '3.11' and extra == 'extra-7-premap2-cu117') or (python_full_version < '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cu117') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cu117')" },
+    { name = "torchvision", version = "0.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (python_full_version >= '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "torchvision", version = "0.14.1", source = { registry = "https://download.pytorch.org/whl/cu117" }, marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (python_full_version >= '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cu117') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "torchvision", version = "0.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (extra != 'extra-7-premap2-cpu' and extra != 'extra-7-premap2-cu117')" },
+    { name = "torchvision", version = "0.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(python_full_version >= '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (python_full_version < '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-7-premap2-cpu') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "torchvision", version = "0.14.1+cu117", source = { registry = "https://download.pytorch.org/whl/cu117" }, marker = "(python_full_version >= '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (python_full_version < '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
     { name = "tqdm" },
+]
+
+[package.optional-dependencies]
+cpu = [
+    { name = "torch", version = "1.13.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (python_full_version >= '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "torch", version = "1.13.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(python_full_version >= '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (python_full_version < '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-7-premap2-cpu') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "torchvision", version = "0.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (python_full_version >= '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "torchvision", version = "0.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(python_full_version >= '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (python_full_version < '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-7-premap2-cpu') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+]
+cu117 = [
+    { name = "torch", version = "1.13.1", source = { registry = "https://download.pytorch.org/whl/cu117" }, marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (python_full_version >= '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "torch", version = "1.13.1+cu117", source = { registry = "https://download.pytorch.org/whl/cu117" }, marker = "(python_full_version >= '3.11' and extra == 'extra-7-premap2-cu117') or (python_full_version < '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cu117') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cu117')" },
+    { name = "torchvision", version = "0.14.1", source = { registry = "https://download.pytorch.org/whl/cu117" }, marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (python_full_version >= '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cu117') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "torchvision", version = "0.14.1+cu117", source = { registry = "https://download.pytorch.org/whl/cu117" }, marker = "(python_full_version >= '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (python_full_version < '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
 ]
 
 [package.dev-dependencies]
@@ -587,12 +627,17 @@ requires-dist = [
     { name = "onnxruntime", specifier = ">=1.20.1" },
     { name = "psutil", specifier = ">=6.1.0" },
     { name = "pyyaml", specifier = ">=6.0.0" },
-    { name = "setuptools", specifier = ">=75.6.0" },
+    { name = "setuptools", specifier = "<81" },
     { name = "sortedcontainers", specifier = ">=2.4.0" },
     { name = "torch", specifier = "<2.0" },
+    { name = "torch", marker = "extra == 'cpu'", specifier = "<2", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "premap2", extra = "cpu" } },
+    { name = "torch", marker = "extra == 'cu117'", specifier = "<2", index = "https://download.pytorch.org/whl/cu117", conflict = { package = "premap2", extra = "cu117" } },
     { name = "torchvision", specifier = ">=0.12" },
+    { name = "torchvision", marker = "extra == 'cpu'", specifier = "<0.15", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "premap2", extra = "cpu" } },
+    { name = "torchvision", marker = "extra == 'cu117'", specifier = "<0.15", index = "https://download.pytorch.org/whl/cu117", conflict = { package = "premap2", extra = "cu117" } },
     { name = "tqdm", specifier = ">=4.67.0" },
 ]
+provides-extras = ["cpu", "cu117"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -684,12 +729,12 @@ name = "pytest"
 version = "8.3.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
-    { name = "exceptiongroup", marker = "python_full_version < '3.11'" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "exceptiongroup", marker = "python_full_version < '3.11' or (extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
     { name = "iniconfig" },
     { name = "packaging" },
     { name = "pluggy" },
-    { name = "tomli", marker = "python_full_version < '3.11'" },
+    { name = "tomli", marker = "python_full_version < '3.11' or (extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/05/35/30e0d83068951d90a01852cb1cef56e5d8a09d20c7f511634cc2f7e0372a/pytest-8.3.4.tar.gz", hash = "sha256:965370d062bce11e73868e0335abac31b4d3de0e82f4007408d242b4f8610761", size = 1445919, upload-time = "2024-12-01T12:54:25.98Z" }
 wheels = [
@@ -879,13 +924,43 @@ wheels = [
 [[package]]
 name = "torch"
 version = "1.13.1"
+source = { registry = "https://download.pytorch.org/whl/cpu" }
+resolution-markers = [
+    "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or sys_platform == 'darwin'",
+]
+dependencies = [
+    { name = "typing-extensions", marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (python_full_version >= '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+]
+wheels = [
+    { url = "https://download-r2.pytorch.org/whl/torch-1.13.1-cp310-cp310-manylinux2014_aarch64.whl", hash = "sha256:d9fe785d375f2e26a5d5eba5de91f89e6a3be5d11efb497e76705fdf93fa3c2e", upload-time = "2023-10-06T21:38:50Z" },
+    { url = "https://download-r2.pytorch.org/whl/cpu/torch-1.13.1-cp310-none-macosx_10_9_x86_64.whl", hash = "sha256:393a6273c832e047581063fb74335ff50b4c566217019cc6ace318cd79eb0566", upload-time = "2023-10-06T00:08:50Z" },
+    { url = "https://download-r2.pytorch.org/whl/cpu/torch-1.13.1-cp310-none-macosx_11_0_arm64.whl", hash = "sha256:0122806b111b949d21fa1a5f9764d1fd2fcc4a47cb7f8ff914204fd4fc752ed5", upload-time = "2023-10-06T00:09:01Z" },
+]
+
+[[package]]
+name = "torch"
+version = "1.13.1"
+source = { registry = "https://download.pytorch.org/whl/cu117" }
+resolution-markers = [
+    "python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux'",
+]
+dependencies = [
+    { name = "typing-extensions", marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (python_full_version >= '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+]
+wheels = [
+    { url = "https://download-r2.pytorch.org/whl/torch-1.13.1-cp310-cp310-manylinux2014_aarch64.whl", hash = "sha256:d9fe785d375f2e26a5d5eba5de91f89e6a3be5d11efb497e76705fdf93fa3c2e", upload-time = "2023-10-06T21:38:50Z" },
+]
+
+[[package]]
+name = "torch"
+version = "1.13.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu11", marker = "sys_platform == 'linux'" },
-    { name = "nvidia-cuda-nvrtc-cu11", marker = "sys_platform == 'linux'" },
-    { name = "nvidia-cuda-runtime-cu11", marker = "sys_platform == 'linux'" },
-    { name = "nvidia-cudnn-cu11", marker = "sys_platform == 'linux'" },
-    { name = "typing-extensions" },
+    { name = "nvidia-cublas-cu11", marker = "(sys_platform == 'linux' and extra != 'extra-7-premap2-cpu' and extra != 'extra-7-premap2-cu117') or (extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "nvidia-cuda-nvrtc-cu11", marker = "(sys_platform == 'linux' and extra != 'extra-7-premap2-cpu' and extra != 'extra-7-premap2-cu117') or (extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "nvidia-cuda-runtime-cu11", marker = "(sys_platform == 'linux' and extra != 'extra-7-premap2-cpu' and extra != 'extra-7-premap2-cu117') or (extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "nvidia-cudnn-cu11", marker = "(sys_platform == 'linux' and extra != 'extra-7-premap2-cpu' and extra != 'extra-7-premap2-cu117') or (extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "typing-extensions", marker = "(extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (extra != 'extra-7-premap2-cpu' and extra != 'extra-7-premap2-cu117')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/81/58/431fd405855553af1a98091848cf97741302416b01462bbf9909d3c422b3/torch-1.13.1-cp310-cp310-manylinux1_x86_64.whl", hash = "sha256:fd12043868a34a8da7d490bf6db66991108b00ffbeecb034228bfcbbd4197143", size = 887450534, upload-time = "2022-12-15T20:15:37.432Z" },
@@ -897,15 +972,89 @@ wheels = [
 ]
 
 [[package]]
+name = "torch"
+version = "1.13.1+cpu"
+source = { registry = "https://download.pytorch.org/whl/cpu" }
+resolution-markers = [
+    "(python_full_version >= '3.11' and sys_platform == 'linux') or (platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')",
+]
+dependencies = [
+    { name = "typing-extensions", marker = "(python_full_version >= '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (python_full_version < '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-7-premap2-cpu') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+]
+wheels = [
+    { url = "https://download-r2.pytorch.org/whl/cpu/torch-1.13.1%2Bcpu-cp310-cp310-linux_x86_64.whl", hash = "sha256:11692523b87c45b79ddfb5148b12a713d85235d399915490d94e079521f7e014", upload-time = "2023-10-06T00:07:35Z" },
+    { url = "https://download-r2.pytorch.org/whl/cpu/torch-1.13.1%2Bcpu-cp310-cp310-win_amd64.whl", hash = "sha256:207ab3700cd9c4349f4fd1892597eb3d385eb78221c0f2974ec54b8ea903aa00", upload-time = "2023-10-06T00:07:44Z" },
+    { url = "https://download-r2.pytorch.org/whl/cpu/torch-1.13.1%2Bcpu-cp311-cp311-linux_x86_64.whl", hash = "sha256:dc185f2fdbb1f84855929d3ba7b36c74f218789d26a0e0268cb0586d466c8c24", upload-time = "2023-10-06T00:07:53Z" },
+]
+
+[[package]]
+name = "torch"
+version = "1.13.1+cu117"
+source = { registry = "https://download.pytorch.org/whl/cu117" }
+resolution-markers = [
+    "(python_full_version >= '3.11' and sys_platform == 'linux') or (platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')",
+    "sys_platform == 'darwin'",
+]
+dependencies = [
+    { name = "typing-extensions", marker = "(python_full_version >= '3.11' and extra == 'extra-7-premap2-cu117') or (python_full_version < '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cu117') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cu117')" },
+]
+wheels = [
+    { url = "https://download-r2.pytorch.org/whl/cu117/torch-1.13.1%2Bcu117-cp310-cp310-linux_x86_64.whl", hash = "sha256:14c5c9db09df8cf1b3942a3479c779da6e293a84a162d8a6ac71e2bde30e30c5", upload-time = "2023-10-08T23:51:15Z" },
+    { url = "https://download-r2.pytorch.org/whl/cu117/torch-1.13.1%2Bcu117-cp310-cp310-win_amd64.whl", hash = "sha256:978239684c6ec455ad2157ff33d44fdb9dd8d3a93b9d2f4ac7aa57691e990136", upload-time = "2023-10-08T23:52:16Z" },
+    { url = "https://download-r2.pytorch.org/whl/cu117/torch-1.13.1%2Bcu117-cp311-cp311-linux_x86_64.whl", hash = "sha256:d151d82462f125e35995ef6701213a499ffbe0994ce66bdad4349049a51a015e", upload-time = "2023-10-08T23:53:32Z" },
+]
+
+[[package]]
+name = "torchvision"
+version = "0.14.1"
+source = { registry = "https://download.pytorch.org/whl/cpu" }
+resolution-markers = [
+    "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or sys_platform == 'darwin'",
+]
+dependencies = [
+    { name = "numpy", marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (python_full_version >= '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "pillow", marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (python_full_version >= '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "requests", marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (python_full_version >= '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "torch", version = "1.13.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (python_full_version >= '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "typing-extensions", marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (python_full_version >= '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+]
+wheels = [
+    { url = "https://download-r2.pytorch.org/whl/torchvision-0.14.1-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:eeb05dd9dd3af5428fee525400759daf8da8e4caec45ddd6908cfb36571f6433", upload-time = "2023-10-06T21:47:18Z" },
+    { url = "https://download-r2.pytorch.org/whl/cpu/torchvision-0.14.1-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:8d0766ea92affa7af248e327dd85f7c9cfdf51a57530b43212d4e1858548e9d7", upload-time = "2023-10-06T00:35:32Z" },
+    { url = "https://download-r2.pytorch.org/whl/torchvision-0.14.1-cp310-cp310-manylinux2014_aarch64.whl", hash = "sha256:8a9eb773a2fa8f516e404ac09c059fb14e6882c48fdbb9c946327d2ce5dba6cd", upload-time = "2023-10-06T21:47:19Z" },
+]
+
+[[package]]
+name = "torchvision"
+version = "0.14.1"
+source = { registry = "https://download.pytorch.org/whl/cu117" }
+resolution-markers = [
+    "sys_platform == 'darwin'",
+    "python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux'",
+]
+dependencies = [
+    { name = "numpy", marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (python_full_version >= '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cu117') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "pillow", marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (python_full_version >= '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cu117') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "requests", marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (python_full_version >= '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cu117') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "torch", version = "1.13.1", source = { registry = "https://download.pytorch.org/whl/cu117" }, marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (python_full_version >= '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "torch", version = "1.13.1+cu117", source = { registry = "https://download.pytorch.org/whl/cu117" }, marker = "(sys_platform == 'darwin' and extra == 'extra-7-premap2-cu117') or (extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "typing-extensions", marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (python_full_version >= '3.11' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cu117') or (sys_platform != 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+]
+wheels = [
+    { url = "https://download-r2.pytorch.org/whl/torchvision-0.14.1-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:eeb05dd9dd3af5428fee525400759daf8da8e4caec45ddd6908cfb36571f6433", upload-time = "2023-10-06T21:47:18Z" },
+    { url = "https://download-r2.pytorch.org/whl/torchvision-0.14.1-cp310-cp310-manylinux2014_aarch64.whl", hash = "sha256:8a9eb773a2fa8f516e404ac09c059fb14e6882c48fdbb9c946327d2ce5dba6cd", upload-time = "2023-10-06T21:47:19Z" },
+]
+
+[[package]]
 name = "torchvision"
 version = "0.14.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy" },
-    { name = "pillow" },
-    { name = "requests" },
-    { name = "torch" },
-    { name = "typing-extensions" },
+    { name = "numpy", marker = "(extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (extra != 'extra-7-premap2-cpu' and extra != 'extra-7-premap2-cu117')" },
+    { name = "pillow", marker = "(extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (extra != 'extra-7-premap2-cpu' and extra != 'extra-7-premap2-cu117')" },
+    { name = "requests", marker = "(extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (extra != 'extra-7-premap2-cpu' and extra != 'extra-7-premap2-cu117')" },
+    { name = "torch", version = "1.13.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (extra != 'extra-7-premap2-cpu' and extra != 'extra-7-premap2-cu117')" },
+    { name = "typing-extensions", marker = "(extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (extra != 'extra-7-premap2-cpu' and extra != 'extra-7-premap2-cu117')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/04/7e/4eaf3fff579af12c5d02514fd613826b939c24f5a9d2c8962c7e23560382/torchvision-0.14.1-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:eeb05dd9dd3af5428fee525400759daf8da8e4caec45ddd6908cfb36571f6433", size = 1391610, upload-time = "2022-12-15T20:19:54.233Z" },
@@ -916,11 +1065,49 @@ wheels = [
 ]
 
 [[package]]
+name = "torchvision"
+version = "0.14.1+cpu"
+source = { registry = "https://download.pytorch.org/whl/cpu" }
+resolution-markers = [
+    "(python_full_version >= '3.11' and sys_platform == 'linux') or (platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')",
+]
+dependencies = [
+    { name = "numpy", marker = "(python_full_version >= '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (python_full_version < '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-7-premap2-cpu') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "pillow", marker = "(python_full_version >= '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (python_full_version < '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-7-premap2-cpu') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "requests", marker = "(python_full_version >= '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (python_full_version < '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-7-premap2-cpu') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "torch", version = "1.13.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(python_full_version >= '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (python_full_version < '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-7-premap2-cpu') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "typing-extensions", marker = "(python_full_version >= '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (python_full_version < '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-7-premap2-cpu') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+]
+wheels = [
+    { url = "https://download-r2.pytorch.org/whl/cpu/torchvision-0.14.1%2Bcpu-cp310-cp310-linux_x86_64.whl", hash = "sha256:a49c36369b48720304cda4085bba4a05b42ff295400feae89e0ee8683051f923", upload-time = "2023-10-06T00:35:27Z" },
+    { url = "https://download-r2.pytorch.org/whl/cpu/torchvision-0.14.1%2Bcpu-cp310-cp310-win_amd64.whl", hash = "sha256:9191ce52974a6be4f2f75a23d9c96371ac3025448dfd48ee0d2a553316944c4c", upload-time = "2023-10-06T00:35:28Z" },
+]
+
+[[package]]
+name = "torchvision"
+version = "0.14.1+cu117"
+source = { registry = "https://download.pytorch.org/whl/cu117" }
+resolution-markers = [
+    "(python_full_version >= '3.11' and sys_platform == 'linux') or (platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')",
+]
+dependencies = [
+    { name = "numpy", marker = "(python_full_version >= '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (python_full_version < '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "pillow", marker = "(python_full_version >= '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (python_full_version < '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "requests", marker = "(python_full_version >= '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (python_full_version < '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "torch", version = "1.13.1+cu117", source = { registry = "https://download.pytorch.org/whl/cu117" }, marker = "(python_full_version >= '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (python_full_version < '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+    { name = "typing-extensions", marker = "(python_full_version >= '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (python_full_version < '3.11' and sys_platform == 'linux' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117') or (platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-7-premap2-cu117') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-7-premap2-cu117') or (sys_platform == 'darwin' and extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
+]
+wheels = [
+    { url = "https://download-r2.pytorch.org/whl/cu117/torchvision-0.14.1%2Bcu117-cp310-cp310-linux_x86_64.whl", hash = "sha256:83d271a530392814b8c7f69382285cac7c7da79b8f5dcc6bcf56c628547bce53", upload-time = "2023-10-09T03:36:06Z" },
+    { url = "https://download-r2.pytorch.org/whl/cu117/torchvision-0.14.1%2Bcu117-cp310-cp310-win_amd64.whl", hash = "sha256:b39fc67e7131053d435804d7901e88528611c0832fd9f1cc26476b5a27cc5d81", upload-time = "2023-10-09T03:36:08Z" },
+]
+
+[[package]]
 name = "tqdm"
 version = "4.67.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-7-premap2-cpu' and extra == 'extra-7-premap2-cu117')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a8/4b/29b4ef32e036bb34e4ab51796dd745cdba7ed47ad142a9f4a1eb8e0c744d/tqdm-4.67.1.tar.gz", hash = "sha256:f8aef9c52c08c13a65f30ea34f4e5aac3fd1a34959879d7e59e63027286627f2", size = 169737, upload-time = "2024-11-24T20:12:22.481Z" }
 wheels = [
