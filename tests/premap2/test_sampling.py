@@ -1,55 +1,40 @@
 import torch
 
 from premap2.sampling import (
-    LinearBounds,
+    Domain,
+    box_sample,
     calc_samples,
-    get_constraints,
-    get_hit_and_run_samples,
-    sparse_patches_to_matrix,
+    fill_box_samples,
+    fill_rejection_samples,
 )
-from premap2.utils import polytope_contains, split_contains, split_contains2
-from tests.premap2.utils import model_conv, model_linear
+from premap2.utils import WithActivations, assert_history_contains, ess_exp
+from tests.premap2.utils import assert_deep_equal, is_close, model_conv, model_linear
 
 
-def test_get_constraints():
-    history = [([0, 1], [1])]
-    lower = torch.zeros(1, 3)
-    upper = torch.ones(1, 3)
-    lA = torch.tensor([[1.0, 0.5, 0.2], [0.3, 1.0, 0.1]])
-    uA = torch.tensor([[0.8, 0.4, 0.6], [0.1, 0.9, 0.7]])
-    lb = -torch.ones(2)
-    ub = torch.ones(2)
-    X = torch.rand(100, 3) * (upper - lower) + lower
-    y = X @ (lA * 0.5 + uA * 0.5).T + (lb + ub)[None] * 0.5
-    assert torch.all(X @ lA.T + lb[None] <= y)
-    assert torch.all(y <= X @ uA.T + ub[None])
-    layers = [LinearBounds(lA, lb, uA, ub, y.min(0)[0] - 1e-6, y.max(0)[0] + 1e-6)]
-    A, b = get_constraints(history, layers, lower, upper)
-    ycon = polytope_contains(y, None, None, layers[0].lower, layers[0].upper)
-    assert ycon.all().cpu().item()
-    assert polytope_contains(X, A, b, lower, upper).all().cpu().item()
-    layers = [LinearBounds(lA, lb, uA, ub, y.min(0)[0] + 1e4, y.max(0)[0] - 1e-4)]
-    A, b = get_constraints(history, layers, lower, upper)
-    assert A is not None
-    ycon = polytope_contains(y, None, None, layers[0].lower, layers[0].upper)
-    xcon = polytope_contains(X, A, b, lower, upper)
-    assert torch.allclose(ycon, xcon)
-    assert not ycon.all().cpu().item()
-    X = get_hit_and_run_samples(X[xcon], A, b, lower, upper, samples=100)
-    assert polytope_contains(X, A, b, lower, upper).all().cpu().item()
+def test_box():
+    X = box_sample(torch.zeros(1, 2), torch.ones((1, 2)), 1)
+    assert X[0, 0] != X[0, 1]
 
 
 def test_sample():
-    for model, x in [
-        (model_linear(20, 15, 10, 5), torch.zeros(1, 20)),
-        (model_linear(20, 15, 10, 5), torch.zeros(1, 20)),
-        (model_conv(3, 4, 5, 4, 1), torch.zeros(1, 3, 5, 5)),
-        (model_conv(3, 4, 5, 4, 1), torch.zeros(1, 3, 5, 5)),
+    for model, x, use_mask in [
+        (model_linear(20, 15, 10, 5), torch.zeros(1, 20), True),
+        (model_linear(20, 15, 10, 5), torch.zeros(1, 20), False),
+        (model_conv(3, 4, 5, 4, 1), torch.zeros(1, 3, 5, 5), True),
+        (model_conv(3, 4, 5, 4, 1), torch.zeros(1, 3, 5, 5), False),
     ]:
-        s = calc_samples((x, x + 1), model, 100)
-        assert len(s) >= 100
-        xu = x + (torch.rand(x.shape) > 0.3).type(x.dtype)
-        s = calc_samples((x, xu), model, 40)
+        if use_mask:
+            lu = (x, x + (torch.rand(*x.shape) * 0.8).round())
+            mask = (lu[0] < lu[1])[0]
+        else:
+            lu = (x, x + 1)
+            mask = None
+        s = calc_samples(Domain(*lu), model, 100, mask)
+        assert len(s) == 500
+        s.activations = None
+        s.X = s.X[-50:]
+        s.y = s.y[-50:]
+        s = calc_samples(Domain(*lu), model, 100, mask)
         s2 = s.to("cpu:0")
         assert torch.equal(s.y, s2.y)
         split = [
@@ -59,26 +44,47 @@ def test_sample():
             for u in s.unstable()
         ]
         val = [s.activations[i][0].flatten()[j] >= 0 for i, j in enumerate(split)]
-        hist = [([j], [1 if v else -1]) for j, v in zip(split, val)]
         for i, (j, v) in enumerate(zip(split, val)):
             s = s.split(i, j)[1 - int(v)]
-        assert split_contains2(hist, s.activations).all().cpu().item()
-        s = calc_samples(s, model, 100, hist)
-        s = calc_samples(s, model, 100, hist)
-        s = calc_samples(s, model, 100, hist)
-        s = calc_samples(s, model, 100, hist)
+        assert_history_contains(s.activations, s.history)
+        s = calc_samples(s, model, 100, mask)
+        s = calc_samples(s, model, 140, mask)
         s.activations = None
-        s = calc_samples(s, model, 100, hist)
-        s.A = x[:, s.mask] if s.mask is not None else x
-        s.b = torch.zeros((1,))
-        s = calc_samples(s, model, len(s) * 3, hist)
+        s.X = s.X[-50:]
+        s.y = s.y[-50:]
+        s = calc_samples(s, model, 100, mask)
+        s = calc_samples(s, model, 140, mask)
+        s.poly_A = x[:, mask] if use_mask else x
+        s.poly_b = torch.zeros((1,))
+        s.activations = None
+        s.X = s.X[-50:]
+        s.y = s.y[-50:]
+        s = calc_samples(s, model, 100, mask)
+        s = calc_samples(s, model, 140, mask)
+        s.activations = None
+        s.X = s.X[-50:]
+        s.y = s.y[-50:]
+        log_prob = lambda X: -torch.ones(X.shape[0])  # noqa: E731
+        s.log_prob = log_prob(s.X)
+        calc_samples(s, model, 100, mask, log_prob)
+        calc_samples(s, model, 140, mask, log_prob)
+        assert (s.log_prob == -1).all()
+        assert is_close(ess_exp(s.log_prob), len(s), 0.01)
+        s.activations = None
+        s.X = s.X[-50:]
+        s.y = s.y[-50:]
+        log_prob = lambda X: -X.flatten(1).mean(1)  # noqa: E731
+        s.log_prob = log_prob(s.X)
+        assert ess_exp(s.log_prob) < len(s)
+        calc_samples(s, model, 100, mask, log_prob)
+        calc_samples(s, model, 140, mask, log_prob)
 
 
 def test_split():
     lower = torch.tensor([[0.0, 0.0]])
     upper = torch.tensor([[1.0, 1.0]])
     model = model_linear(2, 3, 2)
-    samples = calc_samples((lower, upper), model, num=10)
+    samples = calc_samples(Domain(lower, upper), model, num=10)
     layer_index = 0
     active_count = (samples.activations[layer_index] >= 0).count_nonzero(0)
     neuron_index = int(((active_count - 5).abs().argmin()).cpu().item())
@@ -92,20 +98,105 @@ def test_split():
     if len(samples_a) == 0 or len(samples_b) == 0:
         samples_a.constrain(layer_index, neuron_index, active=True)
         samples_b.constrain(layer_index, neuron_index, active=False)
-    assert samples_a.constraints == [([], [neuron_index])]
-    assert samples_b.constraints == [([neuron_index], [])]
+    assert samples_a.constraints == [([neuron_index], [])]
+    assert samples_b.constraints == [([], [neuron_index])]
 
-    assert split_contains(samples_a.constraints, samples_a.activations).all()
-    assert split_contains(samples_b.constraints, samples_b.activations).all()
+    assert_history_contains(samples_a.activations, samples_a.constraints)
+    assert_history_contains(samples_b.activations, samples_b.constraints)
 
 
-def test_sparse_to_matrix():
-    from premap2.sampling import Patches
+def test_equal():
+    for model, x in [
+        (model_linear(20, 15, 10, 5), torch.zeros(1, 20)),
+        (model_conv(3, 4, 5, 4, 5), torch.zeros(1, 3, 5, 5)),
+    ]:
+        y, a = WithActivations(model)(x)
+        s1 = Domain(
+            X=x,
+            y=y,
+            lower_in=x - 1.0,
+            upper_in=x + 1.0,
+            log_prob=torch.ones(1),
+            activations=a,
+        )
+        s1.poly_A = x.expand((5, *x.shape[1:]))
+        s1.poly_b = torch.zeros(5)
+        s1.lower_As = s1.upper_As = a
+        s2 = s1.to("cpu:0")
+        assert_deep_equal(s1, s2)
+        for s in (s1, s2):
+            s.constrain(0, 0, True)
+            s.constrain(1, 0, False)
+            s.stabilize(2, 2, True)
+            s.stabilize(1, 2, False)
+        assert_deep_equal(s1, s2)
+        s1 = s1.split(0, 1)[int(a[0].ravel()[1] < 0)]
+        assert len(s1) > 0
+        s2 = s2.split(0, 1)[int(a[0].ravel()[1] < 0)]
+        assert_deep_equal(s2, s1.to("cpu:0"))
 
-    img = torch.rand((1, 3, 10, 10))
-    p = torch.rand(5, 1, 4, 4, 3, 3, 3)
-    p = Patches(p, 2, 0, p.shape, output_shape=p.shape[:4])
-    idx = [10, 33]
-    a = p.to_matrix(img.shape)[0][idx]
-    b = sparse_patches_to_matrix(p, idx, img.shape)[0]
-    assert torch.allclose(a, b)
+
+def test_fill_box_samples():
+    model = WithActivations(model_linear(20, 15, 10, 5))
+    sm = Domain(lower_in=torch.zeros((1, 20)), upper_in=torch.ones((1, 20)))  # type: ignore
+    sm = fill_box_samples(sm, model, num=10)
+    assert len(sm) >= 10
+    sm = fill_box_samples(sm, model, num=20)
+    assert len(sm) >= 20
+    log_prob = lambda X: -X.flatten(1).mean(1)  # noqa: E731
+    sm.log_prob = log_prob(sm.X)
+    sm = fill_box_samples(sm, model, num=40, log_prob=log_prob)
+    assert len(sm) >= 40
+
+
+def test_rejection_hit_and_run():
+    model = WithActivations(torch.nn.ReLU())
+    sm = Domain(
+        -100 * torch.ones(1, 2),
+        100 * torch.ones(1, 2),
+        torch.zeros(1, 2),
+        torch.zeros(1, 2),
+    )
+    sm.poly_A = torch.cat((torch.eye(2), -torch.eye(2)))
+    sm.poly_b = torch.Tensor([0.0, 0.0, 1.0, 1.0])
+    sm = fill_rejection_samples(sm, model, 200, hit_batch=10)
+    assert 211 > len(sm) > 200
+    assert torch.all(sm.X >= 0.0)
+    assert torch.all(sm.X <= 1.0)
+
+
+def test_zero_prob():
+    model = WithActivations(torch.nn.ReLU())
+    log_prob = lambda X: torch.where(  # noqa: E731
+        (X >= 0.0).all(1), torch.Tensor([0.0]), torch.Tensor([-torch.inf])
+    )
+    sm = Domain(
+        -torch.ones(1, 2),
+        torch.ones(1, 2),
+        torch.zeros(1, 2),
+        torch.zeros(1, 2),
+    )
+    sm = fill_box_samples(sm, model, 100, log_prob=log_prob)
+    assert len(sm) >= 100
+    assert torch.all(sm.X >= 0.0)
+    assert torch.all(sm.X <= 1.0)
+    sm = Domain(
+        -100 * torch.ones(1, 2),
+        100 * torch.ones(1, 2),
+        torch.zeros(1, 2),
+        torch.zeros(1, 2),
+    )
+    sm.poly_A = torch.cat((torch.eye(2), -torch.eye(2)))
+    sm.poly_b = torch.Tensor([1.0, 1.0, 1.0, 1.0])
+    sm = fill_rejection_samples(sm, model, 100, log_prob=log_prob)
+    assert len(sm) >= 100
+    assert torch.all(sm.X >= 0.0)
+    assert torch.all(sm.X <= 1.0)
+    sm.X = None
+    log_prob = lambda x: torch.as_tensor(-torch.inf).expand(x.size(0))  # noqa: E731
+    sm = fill_box_samples(sm, model, 100, log_prob=log_prob)
+    assert len(sm) == 0
+    sm.X = torch.zeros(1, 2)
+    sm.y = sm.activations = sm.log_prob = None
+    sm = fill_rejection_samples(sm, model, 100, log_prob=log_prob)
+    assert len(sm) == 1

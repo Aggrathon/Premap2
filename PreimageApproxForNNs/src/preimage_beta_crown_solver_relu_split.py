@@ -416,7 +416,7 @@ class LiRPAConvNet:
                     else:
                         # This layer's alpha is not used. For example, we can drop all intermediate layer alphas.
                         del m.alpha[spec_name]
-        elif type(slope) == defaultdict:
+        elif isinstance(slope, dict):
             for m in model.perturbed_optimizable_activations:
                 for spec_name in list(m.alpha.keys()):
                     if spec_name in slope[m.name]:

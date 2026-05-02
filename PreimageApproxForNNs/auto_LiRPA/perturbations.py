@@ -307,16 +307,17 @@ class PerturbationLpNorm(Perturbation):
             assert samples is not None
             bound = None
             if not isinstance(A, eyeC):
-                bound = [
-                    torch.sigmoid(torch.einsum('oi,ni->no', bA, bs.X[:bs.num//2].flatten(1)) + bb[None]).mean()
-                    for bA, bb, bs in zip(A, bias, samples)
-                ]
-                bound = sum(bound)
+                bound = sum(
+                    torch.sigmoid(torch.einsum('o...,n...->no', bA, bx.flatten(1)) + bb[None]).mean()
+                    if not isinstance(bx, tuple) else
+                    (torch.sigmoid(torch.einsum('o...,n...->no', bA, bx[0].flatten(1)) + bb[None]) * bx[1][:, None]).sum(0).mean()
+                    for bA, bb, bx in zip(A, bias, samples)
+                )
             else:
                 assert extra_constr is None
                 # A is an identity matrix. No need to do this matmul.
-                # bound = center + sign * diff
-                bound = samples.X.unsqueeze(0)
+                x_L, x_U = self.get_input_bounds(x, A)
+                bound = ((x_U + x_L) + sign * (x_U - x_L)).reshape(x_L.shape[0], -1, 1) * 0.5
         else:
             assert extra_constr is None
             x = x.reshape(x.shape[0], -1, 1)

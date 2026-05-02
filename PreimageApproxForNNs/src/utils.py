@@ -926,33 +926,26 @@ def construct_vnnlib(X, labels, runnerups, data_max, data_min, perturb_epsilon, 
         # Each example has different perturbations.
         perturb_epsilon = torch.cat(perturb_epsilon)
         perturb_epsilon = perturb_epsilon[example_idx_list]
-    elif type(perturb_epsilon) == torch.Tensor:
-        # Same perturbation for all examples.
-        pass
-    else:
-        # No perturbation, instead we use lower and upper bounds directly.
-        assert arguments.Config["specification"]["type"] == 'bound'
 
-    if arguments.Config["specification"]["type"] == 'bound':
+    if len(X.shape) >= 3:
+        img = X[example_idx_list]
+        atk_tp = arguments.Config["preimage"]['atk_tp']
+        x_lower, x_upper = calc_img_specs(atk_tp, img, model)
+        x_lower, x_upper = x_lower.flatten(1), x_upper.flatten(1)
+    elif arguments.Config["specification"]["type"] == 'bound':
         assert arguments.Config["specification"]["norm"] == float("inf")
         x_lower = data_min.flatten(1)
         x_upper = data_max.flatten(1)
     elif arguments.Config["specification"]["type"] == 'lp':
+        assert perturb_epsilon is not None, "Must specify epsilon if `spec_type==\"lp\"` (or change to `spec_type=\"bound\"`)"
         if arguments.Config["specification"]["norm"] == float("inf"):
-            if len(X.shape) >= 3:
-                img = X[example_idx_list]
-                atk_tp = arguments.Config["preimage"]['atk_tp']
-                x_lower, x_upper = calc_img_specs(atk_tp, img, model)
-                x_lower, x_upper = x_lower.flatten(1), x_upper.flatten(1)
+            if data_max is None:
+                # perturb_eps is already normalized.
+                x_lower = (X[example_idx_list] - perturb_epsilon).flatten(1)
+                x_upper = (X[example_idx_list] + perturb_epsilon).flatten(1)
             else:
-                if data_max is None:
-                    # perturb_eps is already normalized.
-                    x_lower = (X[example_idx_list] - perturb_epsilon).flatten(1)
-                    x_upper = (X[example_idx_list] + perturb_epsilon).flatten(1)
-                else:
-                    x_lower = (X[example_idx_list] - perturb_epsilon).clamp(min=data_min).flatten(1)
-                    x_upper = (X[example_idx_list] + perturb_epsilon).clamp(max=data_max).flatten(1)
-                    
+                x_lower = (X[example_idx_list] - perturb_epsilon).clamp(min=data_min).flatten(1)
+                x_upper = (X[example_idx_list] + perturb_epsilon).clamp(max=data_max).flatten(1)
         else:
             x_lower = X[example_idx_list].flatten(1)
             x_upper = X[example_idx_list].flatten(1)
@@ -962,7 +955,7 @@ def construct_vnnlib(X, labels, runnerups, data_max, data_min, perturb_epsilon, 
         raise ValueError(f'Unsupported perturbation type {arguments.Config["specification"]["type"]}')
 
 
-    x_range = torch.stack([x_lower, x_upper], -1).numpy()
+    x_range = torch.stack([x_lower, x_upper], -1).cpu().numpy()
 
     for i in range(len(example_idx_list)):
         label = labels[example_idx_list[i]].view(1, 1)
@@ -1006,6 +999,11 @@ def construct_vnnlib(X, labels, runnerups, data_max, data_min, perturb_epsilon, 
                 c[0, label] = 1
                 c[0, runnerup] = -1
                 new_c = [(c, np.array([arguments.Config["bab"]["decision_thresh"]]))]
+            else:
+                c = arguments.Config["specification"]["robustness_type"]
+                c = torch.atleast_1d(torch.as_tensor(c))[:, None]
+                th = torch.as_tensor(arguments.Config["bab"]["decision_thresh"]).expand(c.size(0), 1)
+                new_c = [(ci, ti) for ci, ti in zip(c, th)]
         else:
             # Feb 19 2024 add toy example
             # if arguments.Config["data"]["num_outputs"] == 1:
@@ -1098,11 +1096,17 @@ def parse_run_mode():
                 print('No epsilon defined!')
                 perturb_epsilon = None
             if not isinstance(arguments.Config["data"]["dataset"], str):
-                X, labels, data_max, data_min = arguments.Config["data"]["dataset"]
+                if len(arguments.Config["data"]["dataset"]) == 2:
+                    data_min, data_max = arguments.Config["data"]["dataset"]
+                    data_max, data_min = torch.as_tensor(data_max), torch.as_tensor(data_min)
+                    X = torch.stack((data_min, data_max)).squeeze(1)
+                    labels = model_ori(X).argmax(1)
+                else:
+                    X, labels, data_max, data_min = arguments.Config["data"]["dataset"]
+                    X, labels = torch.atleast_2d(torch.as_tensor(X)), torch.atleast_1d(torch.as_tensor(labels))
+                    data_max, data_min = torch.as_tensor(data_max), torch.as_tensor(data_min)
                 target_label = arguments.Config["preimage"].get("label", None)
                 runnerup = arguments.Config["preimage"].get("runner_up", None)
-                X, labels = torch.atleast_2d(torch.as_tensor(X)), torch.atleast_1d(torch.as_tensor(labels))
-                data_max, data_min = torch.as_tensor(data_max), torch.as_tensor(data_min)
                 assert X.size(0) == labels.size(0), "batch size of X and labels should be the same!"
                 assert (data_max - data_min).min()>=0, "data_max should always larger or equal to data_min!"
                 data_max = data_max.expand((1, *X.shape[1:]))

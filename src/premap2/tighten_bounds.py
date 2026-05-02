@@ -13,43 +13,38 @@ except ImportError:
 
 class NewBounds:
     def __init__(self, *, active: None | Any = None, inactive: None | Any = None):
-        self.spec = defaultdict(
-            lambda: defaultdict(lambda: (torch.LongTensor(), torch.LongTensor()))
-        )
+        empty = torch.tensor((), dtype=torch.int64)
+        self.spec = defaultdict(lambda: defaultdict(lambda: (empty, empty)))
         if active is not None:
             self.add_active(*active)
         if inactive is not None:
             self.add_inactive(*inactive)
 
     @torch.no_grad()
-    def add_active(self, layer: int, batch: int, index: int | torch.LongTensor):
+    def add_active(self, layer: int, batch: int, index: int | torch.Tensor):
+        active, inactive = self.spec[layer][batch]
         if isinstance(index, torch.Tensor):
-            index = torch.atleast_1d(index)
+            active = torch.cat((active.to(index), torch.atleast_1d(index)))
         else:
-            index = torch.LongTensor([index])
-        if index.numel() > 0:
-            act, ina = self.spec[layer][batch]
-            self.spec[layer][batch] = (torch.cat((act, index)), ina)
+            active = torch.cat((active, active.new_tensor([index])))
+        self.spec[layer][batch] = (active, inactive)
 
     @torch.no_grad()
-    def add_inactive(self, layer: int, batch: int, index: int | torch.LongTensor):
+    def add_inactive(self, layer: int, batch: int, index: int | torch.Tensor):
+        active, inactive = self.spec[layer][batch]
         if isinstance(index, torch.Tensor):
-            index = torch.atleast_1d(index)
+            inactive = torch.cat((inactive.to(index), torch.atleast_1d(index)))
         else:
-            index = torch.LongTensor([index])
-        if index.numel() > 0:
-            act, ina = self.spec[layer][batch]
-            self.spec[layer][batch] = (act, torch.cat((ina, index)))
+            inactive = torch.cat((inactive, inactive.new_tensor([index])))
+        self.spec[layer][batch] = (active, inactive)
 
-    def add_split(
-        self, layer: int, batch: int, index: int | torch.LongTensor, batches: int
-    ):
+    def add_split(self, layer: int, batch: int, index: int, batches: int):
         self.add_active(layer, batch, index)
         self.add_inactive(layer, batch + batches // 2, index)
 
     def iter(
         self,
-    ) -> Iterable[tuple[int, list[tuple[int, torch.LongTensor, torch.LongTensor]]]]:
+    ) -> Iterable[tuple[int, list[tuple[int, torch.Tensor, torch.Tensor]]]]:
         for layer in sorted(self.spec.keys()):
             yield layer, [(b, act, ina) for b, (act, ina) in self.spec[layer].items()]
 

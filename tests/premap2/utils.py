@@ -1,4 +1,5 @@
 import random
+from typing import Callable
 
 import numpy as np
 import torch
@@ -67,3 +68,37 @@ class temp_seed:
         torch.set_rng_state(self.rng_state)
         random.setstate(self.rnd_state)
         np.random.set_state(self.rnp_state)
+
+
+def assert_deep_equal(A: object, B: object):
+    if A is None:
+        assert B is None
+    elif isinstance(A, (int, float, bool)):
+        assert A == B
+    elif isinstance(A, (list, tuple)):
+        assert isinstance(B, type(A))
+        assert len(A) == len(B)
+        for a, b in zip(A, B):
+            assert_deep_equal(a, b)
+    elif isinstance(A, dict):
+        assert isinstance(B, dict)
+        assert len(A) == len(B)
+        for k in A:
+            assert_deep_equal(A[k], B[k])
+    elif isinstance(A, torch.Tensor):
+        assert isinstance(B, torch.Tensor)
+        assert A.shape == B.shape
+        assert torch.equal(A, B)
+    else:
+        assert type(A) is type(B)
+        assert_deep_equal(A.__dict__, B.__dict__)
+
+
+def minimize(
+    x: torch.Tensor, f: Callable[[torch.Tensor], torch.Tensor], steps: int = 10
+) -> torch.Tensor:
+    x = x.requires_grad_(True)
+    optimizer = torch.optim.LBFGS([x])
+    for _ in range(steps):
+        optimizer.step(lambda: f(x))  # type: ignore
+    return x.detach()
