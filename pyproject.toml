@@ -1,6 +1,6 @@
 [project]
 name = "premap2"
-version = "0.3.0"
+version = "0.3.1"
 description = "Preimage approximations for neural networks"
 readme = "README.md"
 authors = [{ name = "Anton Björklund", email = "anton.bjorklund@cs.ox.ac.uk" }]
@@ -35,12 +35,7 @@ Homepage = "https://github.com/Aggrathon/Premap2"
 Repository = "https://github.com/Aggrathon/Premap2.git"
 
 [dependency-groups]
-dev = [
-    "ipython>=8.30.0",
-    "pytest>=8.3.4",
-    "ruff>=0.8.3",
-    "pytest-cov>=6.1.1",
-]
+dev = ["ipython>=8.30.0", "pytest>=8.3.4", "ruff>=0.8.3", "pytest-cov>=6.1.1"]
 
 [project.scripts]
 premap = "premap2.wrapper:cli"
@@ -79,11 +74,7 @@ addopts = ["--cov", "--cov-report="]
 testpaths = ["tests"]
 
 [tool.ruff]
-extend-exclude = [
-    "src/premap",
-    "src/auto_LiRPA",
-    "PreimageApproxForNNs"
-]
+extend-exclude = ["src/premap", "src/auto_LiRPA", "PreimageApproxForNNs"]
 
 [tool.ruff.lint]
 ignore = ["E741"]
@@ -104,5 +95,5 @@ exclude_also = [
     "torch.cuda",
     "if debug:",
     "@torch.jit.script",
-    "if TYPE_CHECKING:"
+    "if TYPE_CHECKING:",
 ]

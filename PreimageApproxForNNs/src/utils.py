@@ -996,7 +996,7 @@ def construct_vnnlib(X, labels, runnerups, data_max, data_min, perturb_epsilon, 
             elif arguments.Config["specification"]["robustness_type"] == "runnerup":
                 runnerup = runnerups[example_idx_list[i]]
                 c = np.zeros([1, num_outputs])
-                c[0, label] = 1
+                c[0, label if target_labels is None else target_labels] = 1
                 c[0, runnerup] = -1
                 new_c = [(c, np.array([arguments.Config["bab"]["decision_thresh"]]))]
             else:

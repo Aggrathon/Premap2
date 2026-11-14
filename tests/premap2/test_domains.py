@@ -8,7 +8,7 @@ from premap2.domains import Domain, DomainList, sizeof_tensors
 from premap2.sampling import calc_samples
 from premap2.utils import WithActivations
 
-from .utils import minimize, model_linear
+from .utils import minimize, model_linear, model_linear_x
 
 
 def test_domains():
@@ -39,14 +39,14 @@ def test_domains():
         d.priority = i
         assert d.X is not None
         assert d.activations is not None
-        domains.add(d)  # type: ignore
+        domains.add(d)
         if i == -np.inf:
             assert d.X is None
         elif i < 0:
             assert d.activations is None
     assert domains.pop().priority == 5.0
     for d in domains.pop().split(0, 1):
-        d.preimg_vol = d.volume
+        d.log_preimg = d.log_volume
         domains.add(d)
     assert domains._cache is not None
     domains.pop(-1)
@@ -64,57 +64,64 @@ def test_domains():
 
 
 def test_split_ci():
-    lower = torch.zeros(10)
-    upper = torch.ones(10)
-    model = model_linear(10, 5, 3, 2)
-    X = torch.rand((1000, 10))
-    y, act = WithActivations(model)(X)
-    balance = (y[:, 0] > y[:, 1]).count_nonzero()
-    d = Domain(lower, upper, X=X, y=y, activations=act, confidence=True)
-    th = torch.zeros(1, 1)
+    with torch.no_grad():
+        lower = torch.zeros(10)
+        upper = torch.ones(10)
+        X = torch.rand((1000, 10))
+        model, _ = model_linear_x(10, 5, 3, 2, seed=81)
+        y, act = WithActivations(model)(X)
+        balance = (y[:, 0] > y[:, 1]).count_nonzero().item()
+        assert 200 < balance < 800
+        d = Domain(lower, upper, X=X, y=y, activations=act, confidence=True)
+        th = torch.zeros(1, 1)
+
+    def error(
+        X: torch.Tensor, y: torch.Tensor, ab: torch.Tensor, c: torch.Tensor
+    ) -> torch.Tensor:
+        pred = X @ ab[:, :-1].T + ab[:, -1:]
+        targ = y @ c.T
+        return targ - pred if under else pred - targ
+
+    def loss(
+        X: torch.Tensor, y: torch.Tensor, ab: torch.Tensor, c: torch.Tensor
+    ) -> float:
+        off = error(X, y, ab, c) - 0.1
+        return torch.where(off < 0.0, 100.0 * off**2, off).mean().item()
+
+    def approx(d: Domain, under: bool, c: torch.Tensor):
+        if d.preimg_A is None or d.preimg_b is None:
+            ab = torch.zeros((1, 11))
+        else:
+            ab = torch.cat((d.preimg_A.view(1, 10), d.preimg_b.view(1, 1)), 1)
+        if len(d.X):  # ty: ignore[invalid-argument-type]
+            ab = minimize(ab, lambda ab: loss(d.X, d.y, ab, c), 2)  # type: ignore
+            ab[:, -1:] -= error(d.X, d.y, ab, c).max() + (0.1 if under else -1.0)  # type: ignore
+        d.preimg_A, d.preimg_b = (ab[:, :-1], ab[:, -1:])
 
     for under in (True, False):
         c = torch.tensor([[-1.0, 1.0]] if (balance < 500) == under else [[1.0, -1.0]])
         domains = DomainList(model, th, c, under, num_samples=500)
         domains.add(d)
 
-        def loss(X: torch.Tensor, y: torch.Tensor, ab: torch.Tensor) -> torch.Tensor:
-            pred = X @ ab[:, :-1].T + ab[:, -1:]
-            targ = y @ c.T
-            if under:
-                off = targ - 0.1 - pred
-            else:
-                off = pred - targ - 0.1
-            return torch.where(off < 0.0, 100.0 * off**2, off).mean()
-
-        def approx(d: Domain):
-            if d.preimg_A is None or d.preimg_b is None:
-                ab = torch.zeros((1, 11))
-            else:
-                ab = torch.cat((d.preimg_A.view(1, 10), d.preimg_b.view(1, 1)), 1)
-            ab = minimize(ab, lambda ab: loss(d.X, d.y, ab), 2)  # type: ignore
-            d.preimg_A, d.preimg_b = ab[:, :-1], ab[:, -1:]
-
         for i in range(10):
             if domains.finished():
                 break
             d = domains.pop()
-            layer = i % len(d.activations)
-            act = d.activations[layer]
+            layer = i % len(d.activations)  # ty: ignore[invalid-argument-type]
+            act = d.activations[layer]  # ty: ignore[not-subscriptable]
             index = ((act >= 0.0).float().mean(0).flatten() - 0.5).abs().argmin().item()
-            da, di = d.split(layer, index, debug=True)
-            approx(da)
+            da, di = d.split(layer, index, debug=True)  # type: ignore
+            approx(da, under, c)
             update_volumes(
                 da, domains.output, domains.threshold, domains.under, debug=True
             )
-            approx(di)
+            approx(di, under, c)
             update_volumes(
                 di, domains.output, domains.threshold, domains.under, debug=True
             )
             domains.add(da)
             domains.add(di)
-        if i == 0:
-            return test_split_ci()
+        assert i > 0, "No splitting occured"
         res = torch.load(domains.save({}, confidence=0.95, debug=True))
         assert np.isfinite(res["preimage_ci"]).all()
         assert np.isfinite(res["approx_ci"]).all()

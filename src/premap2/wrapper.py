@@ -16,9 +16,10 @@ class PremapInPath:
     So that the local imports continue working (without dots).
     """
 
-    def __init__(self, path: None | str = None):
+    def __init__(self, path: None | str | Path = None):
+        print(path)
         if path is not None:
-            self.path = path
+            self.path = str(path)
         else:
             self.path = str(Path(__file__).parent.parent / "premap")
 
@@ -72,7 +73,7 @@ def premap(
     *,
     command_line: bool = False,
     post_config: None | Callable[[dict[str, dict[str, Any]]], None] = None,
-    premap_path: None | str = None,
+    premap_path: None | str | Path = None,
     defaults: dict[str, Any] | None = None,
     silent: bool = False,
     help: bool = False,
@@ -184,7 +185,7 @@ def get_arguments(
                     choice = bool
                 if print:
                     if str(choice).startswith("<class"):
-                        choice = choice.__qualname__
+                        choice = choice.__qualname__  # type: ignore
                     if isinstance(default, str):
                         default = f'"{action.default}"'
                 args.append((action.dest, choice, action.help, default))
@@ -213,7 +214,7 @@ def get_arguments(
                     "  Not all arguments are used for PREMAP, some are left over from αβ-CROWN."
                 )
             else:
-                return args
+                return args  # type: ignore
 
 
 def cli():

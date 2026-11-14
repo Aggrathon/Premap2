@@ -6,7 +6,7 @@ import torch
 from premap2.utils import result_contains
 from premap2.wrapper import PremapInPath, construct_config, get_arguments, premap
 
-from .utils import is_close, model_conv, model_linear, temp_seed
+from .utils import is_close, model_conv_x, model_linear_x
 
 
 def test_construct_config():
@@ -26,12 +26,7 @@ def test_construct_config():
 
 def test_wrapper_fc():
     for i in range(10):
-        with temp_seed(42 + i):
-            model = model_linear(20, 10, 1).eval()
-            x = torch.randn((1, 20))
-        with torch.no_grad():
-            list(model.parameters())[-1] *= 2.0
-            list(model.parameters())[-1] -= model(x).ravel()
+        model, x = model_linear_x(20, 10, 1, seed=42 + i)
         res = premap(
             dataset=[x, 0, 1.0, -1.0],
             model=model,
@@ -69,12 +64,8 @@ def test_wrapper_fc():
 
 def test_wrapper_fco():
     for i in range(10):
-        with temp_seed(42 + i):
-            model = model_linear(20, 10, 1).eval()
-            x = torch.randn((1, 20))
-        with torch.no_grad():
-            list(model.parameters())[-1] *= 2.0
-            list(model.parameters())[-1] -= model(x).ravel()
+        model, x = model_linear_x(20, 10, 1, seed=42 + i)
+        pre = torch.count_nonzero(model(torch.rand((100, 20))) >= 0).item() / 100.0
         res = premap(
             dataset=[x, 0, 1.0, -1.0],
             model=model,
@@ -88,12 +79,13 @@ def test_wrapper_fco():
             under_approx=False,
             over_approx=True,
         )
-        result = torch.load(res[0])
+        result = torch.load(res[0], "cpu")
         res[0].seek(0)  # type: ignore
         assert torch.allclose(
             result_contains(x, result, model),
             result_contains(x, res[0], model),
         )
+        assert abs(result["preimage_vol"] - pre) < 0.1
         if len(result["domains"]) > 1:
             return
     warn("test_wrapper_fco: Could not find a case that needed more than one domain")
@@ -101,12 +93,7 @@ def test_wrapper_fco():
 
 def test_wrapper_mo(tmp_path):
     for i in range(10):
-        with temp_seed(43 + i):
-            model = model_linear(20, 10, 3).eval()
-            x = torch.randn((1, 20))
-        with torch.no_grad():
-            list(model.parameters())[-1] *= 2.0
-            list(model.parameters())[-1] -= model(x).ravel()
+        model, x = model_linear_x(20, 10, 3, seed=43 + i)
         res = premap(
             dataset=[x, 0, 1.0, -1.0],
             model=model,
@@ -128,12 +115,7 @@ def test_wrapper_mo(tmp_path):
 
 def test_wrapper_conv():
     for i in range(10):
-        with temp_seed(42 + i):
-            model = model_conv(3, 4, 5, 4, 1).eval()
-            x = torch.randn((1, 3, 5, 5))
-        with torch.no_grad():
-            list(model.parameters())[-1] *= 2.0
-            list(model.parameters())[-1] -= model(x).ravel()
+        model, x = model_conv_x(3, 4, 5, 4, 1, seed=42 + i)
         res = premap(
             under_approx=True,
             over_approx=False,
@@ -157,12 +139,7 @@ def test_wrapper_conv():
 
 def test_wrapper_conv2():
     for i in range(10):
-        with temp_seed(42 + i):
-            model = model_conv(3, 4, 5, 4, 1).eval()
-            x = torch.randn((1, 3, 5, 5))
-        with torch.no_grad():
-            list(model.parameters())[-1] *= 2.0
-            list(model.parameters())[-1] -= model(x).ravel()
+        model, x = model_conv_x(3, 4, 5, 4, 1, seed=42 + i)
         res = premap(
             under_approx=False,
             over_approx=True,
@@ -186,12 +163,7 @@ def test_wrapper_conv2():
 
 
 def test_wrapper_log_prob():
-    with temp_seed(42):
-        model = model_linear(10, 5, 1).eval()
-        x = torch.randn((1, 10))
-    with torch.no_grad():
-        list(model.parameters())[-1] *= 2.0
-        list(model.parameters())[-1] -= model(x).ravel()
+    model, x = model_linear_x(10, 5, 1, seed=42)
     res = premap(
         dataset=[x, 0, 1.0, -1.0],
         model=model,
