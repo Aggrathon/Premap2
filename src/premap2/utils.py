@@ -2,7 +2,9 @@ import numbers
 import sys
 from io import BytesIO
 from pathlib import Path
+from typing import Iterator
 
+import numpy as np
 import torch
 
 
@@ -48,7 +50,7 @@ def expand_patch(
     return full_X
 
 
-@torch.jit.script  # type: ignore
+@torch.jit.script
 def ess_exp(log_weights: torch.Tensor) -> float:
     """Calculate the Effective Sample Size for log weights."""
     top = torch.logsumexp(log_weights, 0) * 2
@@ -56,7 +58,7 @@ def ess_exp(log_weights: torch.Tensor) -> float:
     return (top - bot).exp().item()
 
 
-@torch.jit.script  # type: ignore
+@torch.jit.script
 def sum_exp(x: torch.Tensor) -> torch.Tensor:
     """Calculate the `sum(exp(x), dim=0)`"""
     max = x.max()
@@ -64,6 +66,14 @@ def sum_exp(x: torch.Tensor) -> torch.Tensor:
         return max.exp() * (x - max).exp().sum(0)
     else:
         return x.exp().sum(0)
+
+
+def sum_exp_gen(x: Iterator[float]) -> float:
+    """Calculate the `sum(exp(y) for y in x)`"""
+    x2 = np.fromiter((y for y in x if y > -np.inf), np.float64)
+    if len(x2):
+        return sum_exp(torch.from_numpy(x2)).item()
+    return 0.0
 
 
 def sizeof_tensors(item: object) -> int:
@@ -83,8 +93,8 @@ def sizeof_tensors(item: object) -> int:
             if size == 0:
                 return 0
         return size
-    elif hasattr(item, "__dict__") and len(item.__dict__) > 0:
-        return sum(sizeof_tensors(v) for v in item.__dict__.values())
+    elif hasattr(item, "__dict__") and len(item.__dict__) > 0:  # type: ignore
+        return sum(sizeof_tensors(v) for v in item.__dict__.values())  # type: ignore
     return 0
 
 
@@ -311,6 +321,8 @@ def assert_bounds(
         epsilon = torch.finfo(X.dtype).eps ** 0.5 * 0.5 if epsilon is None else epsilon
         assert (X > lower - epsilon).all()
         assert (X < upper + epsilon).all()
+        if isinstance(upper, torch.Tensor):
+            assert (upper + epsilon > lower).all()
     else:
         for x, lb, ub in zip(X, lower, upper):  # type: ignore
             assert_bounds(x, lb, ub, epsilon)

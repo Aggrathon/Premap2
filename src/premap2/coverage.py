@@ -1,5 +1,3 @@
-from math import exp
-
 import numpy as np
 import torch
 
@@ -36,9 +34,14 @@ def calc_coverage(
         Ab_dict["lbias" if under else "ubias"],
         domains,
     ):
+        old_pri = domain.priority
+        old = (domain.preimg_A, domain.preimg_b, domain.log_preimg, domain.log_approx)
         domain.preimg_A = A
         domain.preimg_b = b
         update_volumes(domain, output, threshold, under, debug=debug)
+        if old_pri < domain.priority:
+            domain.preimg_A, domain.preimg_b, domain.log_preimg, domain.log_approx = old
+            domain.priority = old_pri
 
 
 def update_volumes(
@@ -59,7 +62,7 @@ def update_volumes(
         debug: Enable additional asserts.
     """
     if domain.log_volume == -np.inf:
-        domain.preimg_vol = domain.approx_vol = 0.0
+        domain.log_preimg = domain.log_approx = -np.inf
         domain.priority = -np.inf
         return
 
@@ -71,28 +74,27 @@ def update_volumes(
         verified = torch.logsumexp(domain.log_prob[(approx >= threshold).all(1)], 0)
         preimage, verified = preimage.item(), verified.item()
     else:
-        preimage = (pred >= threshold).all(1).count_nonzero().log().item()
-        verified = (approx >= threshold).all(1).count_nonzero().log().item()
+        with np.errstate(divide="ignore"):
+            preimage = np.log((pred >= threshold).all(1).count_nonzero().item())
+            verified = np.log((approx >= threshold).all(1).count_nonzero().item())
     total = domain.log_size()
-    domain.preimg_vol = exp(domain.log_volume + preimage - total)
-    domain.approx_vol = exp(domain.log_volume + verified - total)
+    domain.log_preimg = domain.log_volume + preimage - total
+    domain.log_approx = domain.log_volume + verified - total
 
     if debug:
         assert pred.shape == approx.shape
         if under:
             assert (approx <= pred + 1e-5).all().item()
-            assert total + 1e-8 >= preimage >= verified
+            assert total + 1e-6 >= preimage >= verified
         else:
             assert (approx >= pred - 1e-5).all().item()
-            assert preimage <= verified <= total + 1e-8
+            assert preimage <= verified <= total + 1e-6
 
-    if not under and preimage >= total:
-        domain.priority = -np.inf
-    elif under and domain.preimg_vol <= -18.0:
-        domain.priority = -np.inf
-    elif abs(verified - preimage) <= 1e-6:
-        domain.priority = -np.inf
-    elif domain.log_volume <= -18.0:
+    if (
+        (domain.log_preimg <= -18.0 if under else preimage >= total)
+        or abs(verified - preimage) <= 1e-6
+        or domain.log_volume <= -18.0
+    ):
         domain.priority = -np.inf
     else:
         domain.priority = abs(domain.approx_vol - domain.preimg_vol)

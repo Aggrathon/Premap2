@@ -1,12 +1,12 @@
 import gc
 import time
+from collections.abc import Callable, Iterator
 from copy import copy
 from dataclasses import dataclass
 from io import BytesIO
-from math import exp
 from pathlib import Path
 from tempfile import TemporaryFile
-from typing import IO, Callable, Iterator, TypeVar
+from typing import IO, TypeVar
 from warnings import warn
 
 import numpy as np
@@ -21,6 +21,7 @@ from premap2.utils import (
     expand_patch,
     sizeof_tensors,
     sum_exp,
+    sum_exp_gen,
 )
 
 try:
@@ -52,12 +53,12 @@ class Domain:
         self.log_prob = log_prob
 
         self.log_volume: float = 0.0
-        self.preimg_vol: float = 1.0
-        self.approx_vol: float = 0.0
+        self.log_preimg: float = 0.0
+        self.log_approx: float = -np.inf
         self.priority: float = 1.0
         self.depth: int = 0
 
-        self.lgbs_volume = 0.0 if confidence else None
+        self.lgbs_volume: float | torch.Tensor | None = 0.0 if confidence else None
         self.lgbs_preimg = None
         self.lgbs_approx = None
 
@@ -83,7 +84,15 @@ class Domain:
 
     @property
     def volume(self) -> float:
-        return exp(self.log_volume)
+        return np.exp(self.log_volume)
+
+    @property
+    def preimg_vol(self) -> float:
+        return np.exp(self.log_preimg)
+
+    @property
+    def approx_vol(self) -> float:
+        return np.exp(self.log_approx)
 
     def subset(self, mask: torch.Tensor) -> "Domain":
         """Get a subset of the samples of this domain.
@@ -134,12 +143,12 @@ class Domain:
         leni = len(dom_ina)
         if lena == 0:
             dom_act.log_volume = dom_act.priority = -np.inf
-            dom_act.preimg_vol = dom_act.approx_vol = 0.0
+            dom_act.log_preimg = dom_act.log_approx = -np.inf
             if dom_act.lgbs_volume is not None:
                 dom_act.lgbs_volume = -np.inf
         elif leni == 0:
             dom_ina.log_volume = dom_ina.priority = -np.inf
-            dom_ina.preimg_vol = dom_ina.approx_vol = 0.0
+            dom_ina.log_preimg = dom_ina.log_approx = -np.inf
             if dom_ina.lgbs_volume is not None:
                 dom_ina.lgbs_volume = -np.inf
         else:
@@ -155,8 +164,8 @@ class Domain:
                 vol_left, vol_right = bootstrap_split(mask, self.log_prob, debug=debug)
                 dom_act.lgbs_volume = dom_act.lgbs_volume + vol_left
                 dom_ina.lgbs_volume = dom_ina.lgbs_volume + vol_right
-            dom_act.preimg_vol = dom_act.approx_vol = np.nan
-            dom_ina.preimg_vol = dom_ina.approx_vol = np.nan
+            dom_act.log_preimg = dom_act.log_approx = np.nan
+            dom_ina.log_preimg = dom_ina.log_approx = np.nan
         if debug:
             assert abs(dom_act.volume + dom_ina.volume - self.volume) < 1e-5
         return dom_act, dom_ina
@@ -232,7 +241,7 @@ class Domain:
         if len(self) == 0:
             return -np.inf
         elif self.log_prob is None:
-            return torch.log(torch.tensor(len(self))).item()
+            return np.log(len(self))
         else:
             return torch.logsumexp(self.log_prob, 0).item()
 
@@ -306,7 +315,8 @@ class Domain:
             or self.lgbs_preimg is not None
         ):
             return
-        assert (A := self.preimg_A) is not None and (b := self.preimg_b) is not None
+        A, b = self.preimg_A, self.preimg_b
+        assert A is not None and b is not None
         assert self.X is not None and self.y is not None
         pred = torch.einsum("o...,n...->no", output, self.y)
         approx = torch.einsum("o...,n...->no", A, self.X) + b.view(1, -1)
@@ -332,7 +342,7 @@ def recursive_to(var: T, device: torch.device | str, non_blocking: bool = True) 
     elif isinstance(var, dict):
         return {k: recursive_to(v, device, non_blocking) for k, v in var.items()}  # type: ignore
     elif isinstance(var, Patches):
-        return var.create_similar(  # type: ignore
+        return var.create_similar(
             var.patches.detach().to(device, non_blocking=non_blocking)  # type: ignore
         )
     elif isinstance(var, torch.Tensor):
@@ -411,7 +421,7 @@ class DomainList:
 
     def finished(self) -> bool:
         """Are all domains fully explored"""
-        return len(self._list) == 0 or self._list[0].domain.priority == -np.inf  # type: ignore
+        return len(self._list) == 0 or self._list[0].domain.priority == -np.inf
 
     def __len__(self) -> int:
         return len(self._list)
@@ -440,7 +450,7 @@ class DomainList:
     @torch.no_grad()
     def add(self, domain: Domain, *, debug: bool = IS_TEST_OR_DEBUG):
         """Add a domain to the list (reducing and storing as needed)."""
-        if self.under and (domain.log_volume == -np.inf or domain.preimg_vol == 0):
+        if self.under and not np.isfinite(domain.log_preimg):
             print("Dropping empty subdomain.")
             return
         if domain.upper_out is not None:
@@ -455,9 +465,9 @@ class DomainList:
                 shape = domain.preimg_A.shape
                 domain.preimg_A = domain.preimg_A.new_zeros(1).expand(shape)
                 domain.preimg_b = domain.lower_out
-                domain.approx_vol = domain.preimg_vol = domain.volume
+                domain.log_approx = domain.log_preimg = domain.log_volume
         if debug:
-            assert domain.preimg_vol <= domain.volume + 1e-6, (
+            assert domain.log_preimg <= domain.log_volume + 1e-6, (
                 f"Invalid preimage volume: {domain.preimg_vol} <= {domain.volume}"
             )
         if domain.priority == -np.inf:
@@ -471,7 +481,7 @@ class DomainList:
             self.store(item)
             return
         pos = self._list.index(item)
-        if pos > self.keep and self._list[pos - 1].cached is not None:  # type: ignore
+        if pos > self.keep and self._list[pos - 1].cached is not None:
             self.store(item)
             return
         item.size = sizeof_tensors(domain)
@@ -479,7 +489,7 @@ class DomainList:
         if self._uppersize <= self.device_size:
             return
         if pos > self.keep:
-            prev: "DomainList.Item" = self._list[pos - 1]  # type: ignore
+            prev: DomainList.Item = self._list[pos - 1]
             if prev.cached is not None:
                 self.store(item)
                 return
@@ -494,7 +504,7 @@ class DomainList:
                     return
         if self._count % self.interval == 0:
             totsize = sum(item.size for item in self._list[: self.keep])
-            item: "DomainList.Item"
+            item: DomainList.Item
             for item in self._list[self.keep :]:
                 totsize += item.size
                 if totsize > self.store_size:
@@ -511,7 +521,7 @@ class DomainList:
 
     def iter(self) -> Iterator[Domain]:
         """Iterate over domains with forced reducing and temporary loading."""
-        item: "DomainList.Item"
+        item: DomainList.Item
         for item in self._list:
             yield self.temp_load(item).to(self.device).expand_memory(self.mask)
             if not item.deviced:
@@ -531,7 +541,7 @@ class DomainList:
     def store(self, item: "DomainList.Item"):
         """Store a domain in the disk cache."""
         if self._cache is None:
-            self._cache = TemporaryFile()
+            self._cache = TemporaryFile()  # noqa: SIM115
             for i in reversed(self._list):
                 if i.domain.priority == -np.inf:
                     self.store(i)
@@ -547,7 +557,7 @@ class DomainList:
             self._cache.flush()
             item.cached = (start, self._cache.tell() - start)
         else:
-            item.cached = TemporaryFile()
+            item.cached = TemporaryFile()  # noqa: SIM115
             torch.save(item.domain, item.cached, pickle_protocol=-1)
             item.cached.flush()
         for k, v in item.domain.__dict__.items():
@@ -590,7 +600,7 @@ class DomainList:
     def __del__(self):
         if self._cache is not None:
             self._cache.close()
-        item: "DomainList.Item"
+        item: DomainList.Item
         for item in reversed(self._list):
             if item.cached is None:
                 break
@@ -696,8 +706,8 @@ class DomainList:
         preimage_vol = 0.0
         approx_vol = 0.0
         if confidence is not None:
-            lgbs_preimg = []
-            lgbs_approx = []
+            lgbs_preimg: list[torch.Tensor] = []
+            lgbs_approx: list[torch.Tensor] = []
         gc.collect()
         for d in self.iter():
             preimage_vol += d.preimg_vol
@@ -716,7 +726,7 @@ class DomainList:
                     d.bootstrap_final(self.output, self.threshold)
                 if d.lgbs_preimg is not None:
                     lgbs_preimg.append(d.lgbs_preimg)
-                    lgbs_approx.append(d.lgbs_approx)
+                    lgbs_approx.append(d.lgbs_approx)  # type: ignore
             del d
         if debug:
             assert preimage_vol <= 1.0 + 1e-5
@@ -799,3 +809,9 @@ class DomainList:
             torch.save(out, path, pickle_protocol=5)
             print("PREMAP results saved to:", str(path))
         return path
+
+    def approx_volume(self) -> float:
+        return sum_exp_gen(d.log_approx for d in self)
+
+    def preimg_volume(self) -> float:
+        return sum_exp_gen(d.log_preimg for d in self)

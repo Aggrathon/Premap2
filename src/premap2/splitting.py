@@ -57,7 +57,7 @@ def select_node_batch(
                 (v, l, j) for v, l, j in d.selection if mask[l].view(-1)[j].item()
             ]
         if not d.selection or len(d.selection) == 1:
-            # `len(d.selection) == 1` is used as a proxy for final split
+            # Keep `len(d.selection) > 1` to not look like the final split
             assert d.X is not None and d.y is not None and d.activations is not None
             act = d.activations
             d.selection = calc_priority(
@@ -68,10 +68,10 @@ def select_node_batch(
                 d.lower_all,
                 d.upper_all,
                 mask,
-                **coefs,
+                **coefs,  # type: ignore
                 debug=debug,
             )
-    return [d.selection.pop() for d in domains]  # type: ignore
+    return [d.selection.pop() for d in domains]
 
 
 def calc_priority(
@@ -144,7 +144,7 @@ def calc_priority(
         else:
             areas = [
                 A.abs().sum(0) * lb**2 * u
-                for A, lb, u in zip(lAs or uAs, lower, unstable)
+                for A, lb, u in zip(lAs or uAs, lower, unstable)  # type: ignore
             ]
         area_norm = area_coef / (max(a.max() for a in areas) + eps)
         for pri, area in zip(priority, areas):
@@ -165,7 +165,7 @@ def calc_priority(
             for lA, uA, act, u in zip(lAs, uAs, activations, unstable):
                 dists.append(_heuristic_extra2(lA, uA, act, u, eps))
         else:
-            for A, act, u in zip(lAs or uAs, activations, unstable):
+            for A, act, u in zip(lAs or uAs, activations, unstable):  # type: ignore
                 dists.append(_heuristic_extra(A, act, u, eps))
         dist_norm = extra_coef / (max((d.max() for d in dists)) + eps)
         for pri, d in zip(priority, dists):
@@ -179,7 +179,7 @@ def calc_priority(
         else:
             unders = [
                 (A * lb[None]).abs().sum(0) * u
-                for A, lb, u in zip(lAs or uAs, lower, unstable)
+                for A, lb, u in zip(lAs or uAs, lower, unstable)  # type: ignore
             ]
         under_norm = under_coef / (max((m.max() for m in unders)) + eps)
         for pri, minf in zip(priority, unders):
@@ -236,7 +236,7 @@ def calc_priority(
     return top
 
 
-@torch.jit.script  # type: ignore
+@torch.jit.script
 def _heuristic_extra(
     A: torch.Tensor, act: torch.Tensor, unstable: torch.Tensor, eps: float
 ) -> torch.Tensor:
@@ -246,7 +246,7 @@ def _heuristic_extra(
     return torch.einsum("b...,n...,...->...", A.abs(), a, m)
 
 
-@torch.jit.script  # type: ignore
+@torch.jit.script
 def _heuristic_extra2(
     lA: torch.Tensor, uA: torch.Tensor, act: torch.Tensor, uns: torch.Tensor, eps: float
 ) -> torch.Tensor:
@@ -295,7 +295,7 @@ def split_node_batch(
     split_str = ""
     left_domains: list[Domain] = []
     right_domains: list[Domain] = []
-    output = domains.output  # type: ignore
+    output = domains.output
     splits = []
     old: list[Domain] = []
     for domain, (priority, layer, index) in zip(selected, branching_decision):
@@ -309,20 +309,22 @@ def split_node_batch(
         d1, d2 = domain.split(layer, index, debug=debug)
         len1 = len(d1)
         len2 = len(d2)
-        split_str += f"({layer}, {index}: {len1} | {len2}) "
+        split_str += f" ({layer}, {index}: {len1} | {len2})"
 
         if len1 == 0:
+            split_str += "*"
             domains.add(d2)
             if not under:  # Save domain not guaranteed to be outside preimage
                 d1.priority = -np.inf
-                d1.preimg_vol = d1.approx_vol = 0.0
+                d1.log_preimg = d1.log_approx = -np.inf
                 domains.add(d1)
             continue
         if len2 == 0:
+            split_str += "*"
             domains.add(d1)
             if not under:  # Save domain not guaranteed to be outside preimage
                 d2.priority = -np.inf
-                d2.preimg_vol = d2.approx_vol = 0.0
+                d2.log_preimg = d2.log_approx = -np.inf
                 domains.add(d2)
             continue
 
@@ -333,6 +335,7 @@ def split_node_batch(
         if domain.selection and (d1.priority == -np.inf or d2.priority == -np.inf):
             domains.add(d1)
             domains.add(d2)
+            split_str += "*"
         else:
             left_domains.append(d1)
             right_domains.append(d2)
@@ -341,13 +344,13 @@ def split_node_batch(
 
     if len(split_str) > 101:
         split_str = split_str[:97] + "..."
-    print("Splits decision:", split_str[:100])
+    print("Splits decision:", split_str[1:100])
 
     selected = left_domains + right_domains
     if debug:
         assert all(len(s) > 0 for s in selected)
         for d in selected:
-            assert_history_contains(d.activations, d.history)
+            assert_history_contains(d.activations, d.history)  # type: ignore
 
     # Tighten the bounds for the splits
     lower_all = [torch.stack(t) for t in zip(*(d.lower_all for d in selected))]
@@ -487,16 +490,13 @@ def get_updated_bounds(
         s.upper_in = ub[None]
         if debug:
             assert s.X is not None
-            eps = torch.finfo(s.X.dtype).eps * 2
-            assert (s.X >= s.lower_in - eps).all().cpu().item()
-            assert (s.X <= s.upper_in + eps).all().cpu().item()
-    lower_all = [l for (l, _) in bounds.values()] + [lower_all[-1]]
-    upper_all = [u for (_, u) in bounds.values()] + [upper_all[-1]]
+            assert_bounds(s.X, s.lower_in, s.upper_in, torch.finfo(s.X.dtype).eps * 2)
     if debug:
-        assert all((ub >= lb).all().item() for lb, ub in zip(lower_all, upper_all))
-        for i, (lbo, ubo) in enumerate(zip(lower_all[:-1], upper_all)):
+        for i, (lbo, ubo) in enumerate(bounds.values()):
             for j, s in enumerate(domains):
                 assert_bounds(s.activations[i], lbo[None, j], ubo[None, j])  # type: ignore
+    lower_all = [torch.minimum(*b) for b in bounds.values()] + [lower_all[-1]]
+    upper_all = [torch.maximum(*b) for b in bounds.values()] + [upper_all[-1]]
     return lower_all, upper_all
 
 
@@ -567,7 +567,7 @@ def _add_stabilized(
     domain = copy(domain)
     domain.history = copy(domain.history)
     domain.log_volume = -np.inf
-    domain.preimg_vol = domain.approx_vol = 0.0
+    domain.log_preimg = domain.log_approx = -np.inf
     domain.priority = -np.inf
     domain.minimize_final()
     domain.stabilize(layer, 0, not active)
