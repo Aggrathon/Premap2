@@ -9,6 +9,8 @@ from premap2.utils import (
     expand_patch,
     history_to_index,
     history_to_sign,
+    sum_exp,
+    sum_exp_gen,
 )
 from tests.premap2.utils import is_close
 
@@ -21,6 +23,17 @@ def test_bounds():
     assert_bounds([torch.rand((3,))], [0.0], torch.ones((1,)))
     with pytest.raises(AssertionError):
         assert_bounds(torch.rand((3,)), 1.0, 0.0)
+
+
+def test_sum_exp():
+    for i in [10, 100, 1000] * 2:
+        x = torch.rand(i, dtype=torch.float64)
+        assert x.exp().sum().item() == pytest.approx(sum_exp(x).item())
+        x[-1] = -torch.inf
+        assert x.exp().sum().item() == pytest.approx(sum_exp(x).item())
+        assert sum_exp_gen(x.numpy()) == pytest.approx(sum_exp(x).item())
+        x[:] = -torch.inf
+        assert sum_exp_gen(x.numpy()) == pytest.approx(sum_exp(x).item())
 
 
 def test_ess():

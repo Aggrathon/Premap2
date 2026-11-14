@@ -1,5 +1,6 @@
 import random
-from typing import Callable
+from collections.abc import Callable
+from itertools import pairwise
 
 import numpy as np
 import torch
@@ -8,11 +9,11 @@ from auto_LiRPA.bound_general import BoundedModule
 
 
 def is_close(a: float | list[float], b: float | list[float], eps: float = 1e-6) -> bool:
-    if torch.is_tensor(a):
-        if torch.is_tensor(b):
+    if isinstance(a, torch.Tensor):
+        if isinstance(b, torch.Tensor):
             return torch.allclose(a, b, atol=eps)
         a = a.detach().cpu().numpy()
-    if torch.is_tensor(b):
+    if isinstance(b, torch.Tensor):
         b = b.detach().cpu().numpy()
     return np.allclose(a, b, atol=eps)
 
@@ -21,27 +22,49 @@ def model_linear(*sizes: int) -> torch.nn.Sequential:
     return torch.nn.Sequential(
         *[
             m
-            for i, o in zip(sizes[:-1], sizes[1:])
+            for i, o in pairwise(sizes)
             for m in (torch.nn.Linear(i, o), torch.nn.ReLU())
         ][:-1]
     )
 
 
+def model_linear_x(
+    *sizes: int, seed: int = 42
+) -> tuple[torch.nn.Sequential, torch.Tensor]:
+    with torch.no_grad():
+        with temp_seed(seed):
+            model = model_linear(*sizes).eval()
+            x = torch.randn((1, sizes[0]))
+        list(model.parameters())[-1] -= model(x).ravel()  # type: ignore
+        return model, x
+
+
 def model_conv(*sizes: int, kernel: int = 3, size: int = 5) -> torch.nn.Sequential:
-    layers = []
-    for i, o in zip(sizes[:-3], sizes[1:]):
-        layers.append(torch.nn.Conv2d(i, o, kernel, 1, 1))
-        layers.append(torch.nn.ReLU())
-    layers.append(torch.nn.Conv2d(sizes[-3], sizes[-2], kernel, 1, 0))
-    layers.append(torch.nn.ReLU())
-    layers.append(torch.nn.Flatten())
-    layers.append(torch.nn.Linear(sizes[-2] * (size - 2) ** 2, sizes[-1]))
-    return torch.nn.Sequential(*layers)
+    model = torch.nn.Sequential()
+    for i, o in pairwise(sizes[:-2]):
+        model.append(torch.nn.Conv2d(i, o, kernel, 1, 1))
+        model.append(torch.nn.ReLU())
+    model.append(torch.nn.Conv2d(sizes[-3], sizes[-2], kernel, 1, 0))
+    model.append(torch.nn.ReLU())
+    model.append(torch.nn.Flatten())
+    model.append(torch.nn.Linear(sizes[-2] * (size - 2) ** 2, sizes[-1]))
+    return model
+
+
+def model_conv_x(
+    *sizes: int, kernel: int = 3, size: int = 5, seed: int = 42
+) -> tuple[torch.nn.Sequential, torch.Tensor]:
+    with torch.no_grad():
+        with temp_seed(seed):
+            model = model_conv(*sizes, kernel=kernel, size=size).eval()
+            x = torch.randn((1, sizes[0], size, size))
+        list(model.parameters())[-1] -= model(x).ravel()  # type: ignore
+        return model, x
 
 
 def get_intermediate_bounds(
     lirpa: BoundedModule,
-) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
+) -> dict[str, tuple[torch.Tensor | None, torch.Tensor | None]]:
     bounds = {}
     for node in (r.inputs[0] for r in lirpa.relus):
         if not hasattr(node, "lower") or not hasattr(node, "upper"):
@@ -77,8 +100,8 @@ def assert_deep_equal(A: object, B: object):
         assert A == B
     elif isinstance(A, (list, tuple)):
         assert isinstance(B, type(A))
-        assert len(A) == len(B)
-        for a, b in zip(A, B):
+        assert len(A) == len(B)  # ty: ignore[invalid-argument-type]
+        for a, b in zip(A, B):  # ty: ignore[invalid-argument-type]
             assert_deep_equal(a, b)
     elif isinstance(A, dict):
         assert isinstance(B, dict)
@@ -95,10 +118,10 @@ def assert_deep_equal(A: object, B: object):
 
 
 def minimize(
-    x: torch.Tensor, f: Callable[[torch.Tensor], torch.Tensor], steps: int = 10
+    x: torch.Tensor, f: Callable[[torch.Tensor], float], steps: int = 10
 ) -> torch.Tensor:
     x = x.requires_grad_(True)
     optimizer = torch.optim.LBFGS([x])
     for _ in range(steps):
-        optimizer.step(lambda: f(x))  # type: ignore
+        optimizer.step(lambda: f(x))
     return x.detach()

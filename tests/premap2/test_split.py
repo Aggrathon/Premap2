@@ -86,7 +86,7 @@ def test_split_node():
     samples.lower_all = [act.min(0)[0] - 0.1 for act in samples.activations]
     samples.upper_all = [act.max(0)[0] + 0.1 for act in samples.activations]
     samples.preimg_A = torch.zeros((1, 2))
-    samples.preimg_vol = 1.0
+    samples.log_preimg = 0.0
     output = torch.eye(2)[:1]
     yo = samples.y @ output.T
     for under in [True, False]:

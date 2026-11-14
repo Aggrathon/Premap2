@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from premap2.sampling import (
@@ -194,9 +195,11 @@ def test_zero_prob():
     assert torch.all(sm.X <= 1.0)
     sm.X = None
     log_prob = lambda x: torch.as_tensor(-torch.inf).expand(x.size(0))  # noqa: E731
-    sm = fill_box_samples(sm, model, 100, log_prob=log_prob)
+    with pytest.warns(UserWarning, match="discarded 100.0%"):
+        sm = fill_box_samples(sm, model, 100, log_prob=log_prob)
     assert len(sm) == 0
     sm.X = torch.zeros(1, 2)
     sm.y = sm.activations = sm.log_prob = None
-    sm = fill_rejection_samples(sm, model, 100, log_prob=log_prob)
+    with pytest.warns(UserWarning, match="Failed to sample"):
+        sm = fill_rejection_samples(sm, model, 100, log_prob=log_prob)
     assert len(sm) == 1
