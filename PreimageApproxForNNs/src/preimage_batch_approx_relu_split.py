@@ -205,14 +205,17 @@ def relu_bab_parallel(net, domain, x, refined_lower_bounds=None,
     
     # This is the first (initial) domain.
     domains = DomainList(device=device, threshold=rhs[0], output=net.c[0], under=bound_lower, model=net.model_ori, log_prob=log_prob, num_samples=sample_num, lower_in=x.ptb.x_L, upper_in=x.ptb.x_U, keep=batch)
+    time_cost = time.time()
     dom = domains.create_domain(thighten=tighten, confidence=confidence is not None, debug=debug)
-    
+    total_pickout_time += time.time() - time_cost
+
     tot_ambi_nodes_sample = 0
     for relu, uns in zip(net.net.relus, dom.unstable()):
         print(f'layer {relu.name} size {tuple(uns.shape)} unstable {uns.count_nonzero()}')
         tot_ambi_nodes_sample += uns.count_nonzero()
     print(f'-----------------\n# of unstable neurons (Sample): {tot_ambi_nodes_sample}\n-----------------\n')
-      
+
+    time_cost = time.time()
     if arguments.Config["solver"]["alpha-crown"]["no_joint_opt"]:
         global_ub, global_lb, _, _, primals, updated_mask, lA, lower_bounds, upper_bounds, pre_relu_indices, slope, history, betas = net.build_the_model_with_refined_bounds(
             domain, x, None, None, stop_criterion_func=stop_criterion(decision_thresh), reference_slopes=None,
@@ -229,6 +232,7 @@ def relu_bab_parallel(net, domain, x, refined_lower_bounds=None,
         # release some storage to save memory
         if activation_opt_params is not None: del activation_opt_params
         torch.cuda.empty_cache()
+    total_solve_time += time.time() - time_cost
     tot_ambi_nodes = 0
     # only pick the first copy from possible multiple x
     updated_mask = [mask[0:1] for mask in updated_mask]
@@ -347,8 +351,8 @@ def relu_bab_parallel(net, domain, x, refined_lower_bounds=None,
                                     fix_intermediate_layer_bounds=not opt_intermediate_beta,
                                     stop_func=stop_criterion, multi_spec_keep_func=multi_spec_keep_func, bound_lower=bound_lower, bound_upper=bound_upper)
 
-        preimg_vol = sum(sd.preimg_vol for sd in domains)
-        approx_vol = sum(sd.approx_vol for sd in domains)
+        approx_vol = domains.approx_volume()
+        preimg_vol = domains.preimg_volume()
         cov_quota = approx_vol / max(1e-8, preimg_vol)
         print('Length of domains:', len(domains))
         print('Preimage volume:', preimg_vol)
